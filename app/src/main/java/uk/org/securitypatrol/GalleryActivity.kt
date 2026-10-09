@@ -1,5 +1,6 @@
 package uk.org.securitypatrol
 
+import android.content.DialogInterface
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.os.Bundle
@@ -22,6 +23,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -41,12 +43,62 @@ class GalleryActivity : AppCompatActivity() {
     private var selectedRoundId: String? = null // null = deliberately view all rounds in this shift
     private val selectedIds = mutableSetOf<String>()
     private var currentId: String? = null
+    private var exportShiftId: String? = null
+    private var exportOriginals = false
+    private var exportInProgress = false
+
+    // Android's document picker lets the officer save the ZIP wherever they
+    // choose. No storage permission or automatic internet/cloud upload.
+    private val createArchive = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("application/zip")
+    ) { uri ->
+        val selectedShiftId = exportShiftId
+        exportShiftId = null
+        if (uri == null || selectedShiftId == null) return@registerForActivityResult
+        if (exportInProgress) {
+            message("An export is already running")
+            return@registerForActivityResult
+        }
+        // Re-read from private storage after returning from the document picker.
+        val snapshot = PatrolStore(this).shifts.firstOrNull { it.id == selectedShiftId }
+        if (snapshot == null) {
+            message("The selected shift was not found")
+            return@registerForActivityResult
+        }
+        val includeOriginals = exportOriginals
+        exportInProgress = true
+        message("Exporting ZIP. Keep the app open until finished.")
+        Thread {
+            try {
+                val result = ShiftArchive.write(applicationContext, snapshot, uri, includeOriginals)
+                runOnUiThread {
+                    message("Export complete: " + result.photos + " small photos, " +
+                        result.originals + " large originals")
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("PatrolGallery", "Shift export failed", e)
+                runOnUiThread {
+                    message("Export failed or incomplete. Try again: " + e.message)
+                }
+            } finally {
+                runOnUiThread { exportInProgress = false }
+            }
+        }.start()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        exportShiftId = savedInstanceState?.getString("exportShiftId")
+        exportOriginals = savedInstanceState?.getBoolean("exportOriginals") ?: false
         store = PatrolStore(this)
         buildUi()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString("exportShiftId", exportShiftId)
+        outState.putBoolean("exportOriginals", exportOriginals)
+        super.onSaveInstanceState(outState)
     }
 
     override fun onResume() {
@@ -123,7 +175,8 @@ class GalleryActivity : AppCompatActivity() {
 
         val selectionRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         selectionRow.addView(action("Select all") { selectAllReady() }, LinearLayout.LayoutParams(0, dp(48), 1f))
-        selectionRow.addView(action("Unsent only") { selectUnsent() }, LinearLayout.LayoutParams(0, dp(48), 1f))
+        selectionRow.addView(action("Unsent") { selectUnsent() }, LinearLayout.LayoutParams(0, dp(48), 1f))
+        selectionRow.addView(action("Flagged") { selectFlagged() }, LinearLayout.LayoutParams(0, dp(48), 1f))
         selectionRow.addView(action("Clear") { clearSelection() }, LinearLayout.LayoutParams(0, dp(48), 1f))
         screen.addView(selectionRow)
 
@@ -156,6 +209,17 @@ class GalleryActivity : AppCompatActivity() {
             LinearLayout.LayoutParams(0, dp(48), 1f)
         )
         screen.addView(patrolUtilities)
+
+        val moreTools = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        moreTools.addView(
+            action("Checkpoints") { showCheckpoints() },
+            LinearLayout.LayoutParams(0, dp(48), 1f)
+        )
+        moreTools.addView(
+            action("Export shift ZIP") { askExportShift() },
+            LinearLayout.LayoutParams(0, dp(48), 1f)
+        )
+        screen.addView(moreTools)
 
         container = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val scroll = ScrollView(this).apply { addView(container) }
@@ -215,6 +279,13 @@ class GalleryActivity : AppCompatActivity() {
         renderPhotos()
     }
 
+    private fun selectFlagged() {
+        selectedIds.clear()
+        currentPhotos().filter { it.incidentFlag && isShareReady(it) }
+            .forEach { selectedIds.add(it.id) }
+        renderPhotos()
+    }
+
     private fun clearSelection() {
         selectedIds.clear()
         renderPhotos()
@@ -243,11 +314,12 @@ class GalleryActivity : AppCompatActivity() {
         val sent = photos.count { it.confirmedSent }
         val ready = photos.count(::isShareReady)
         val originals = photos.count { it.originalPath != null }
+        val flagged = photos.count { it.incidentFlag }
         val scopeLabel = if (selectedRoundId == null) "Whole shift" else {
             "Patrol " + (shift.rounds.indexOfFirst { it.id == selectedRoundId } + 1)
         }
         heading.text = scopeLabel + " • " + photos.size + " photos • " + ready + " ready\n" +
-            sent + " confirmed sent • " + originals + " originals • " +
+            flagged + " flagged • " + sent + " marked sent • " + originals + " originals\n" +
             shortDate(shift.startedMs)
         updateSelectionStatus()
         var previousRoundId: String? = ""
@@ -294,7 +366,8 @@ class GalleryActivity : AppCompatActivity() {
             image.setOnClickListener { showPhotoPreview(photo) }
             row.addView(image, LinearLayout.LayoutParams(dp(82), dp(82)))
             val info = TextView(this).apply {
-                text = shortDate(photo.timeMs) + "\n" + photo.place + "\n" +
+                text = (if (photo.incidentFlag) "⚑ FLAGGED INCIDENT\n" else "") +
+                    shortDate(photo.timeMs) + "\n" + photo.place + "\n" +
                     when {
                         photo.confirmedSent -> "Marked sent"
                         photo.smallPath == null -> "Processing photo..."
@@ -305,8 +378,23 @@ class GalleryActivity : AppCompatActivity() {
             }
             row.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
             panel.addView(row)
-            val edit = action("Edit this photo's place name") { editPhotoPlace(photo) }
-            panel.addView(edit)
+            val photoActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            photoActions.addView(
+                action("Edit place") { editPhotoPlace(photo) },
+                LinearLayout.LayoutParams(0, dp(46), 1f)
+            )
+            photoActions.addView(
+                action(if (photo.incidentFlag) "Unflag incident" else "Flag incident") {
+                    try {
+                        store.flagIncident(photo.id, !photo.incidentFlag)
+                        renderPhotos()
+                    } catch (e: Exception) {
+                        message("Could not update incident flag: " + e.message)
+                    }
+                },
+                LinearLayout.LayoutParams(0, dp(46), 1f)
+            )
+            panel.addView(photoActions)
             container.addView(panel)
             val rule = View(this).apply { setBackgroundColor(Color.DKGRAY) }
             container.addView(rule, LinearLayout.LayoutParams(-1, dp(1)))
@@ -392,6 +480,141 @@ class GalleryActivity : AppCompatActivity() {
                 renderPhotos()
             }
             .setNegativeButton("Keep originals", null).show()
+    }
+
+    private fun askExportShift() {
+        val shift = currentShift() ?: run { message("No shift to export"); return }
+        if (exportInProgress) {
+            message("Wait for the previous export to finish")
+            return
+        }
+        val choices = arrayOf(
+            "Small stamped photos + report + records",
+            "Small photos + any available large originals"
+        )
+        AlertDialog.Builder(this)
+            .setTitle("Export private shift ZIP (not encrypted)")
+            .setItems(choices) { _, selected ->
+                exportShiftId = shift.id
+                exportOriginals = selected == 1
+                createArchive.launch(ShiftArchive.suggestedFilename(shift))
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showCheckpoints() {
+        val shift = currentShift() ?: run { message("No shift selected"); return }
+        val round = shift.rounds.firstOrNull { it.id == selectedRoundId } ?: run {
+            message("Choose a single patrol from the dropdown first")
+            return
+        }
+        val editable = shift.endedMs == null && round.endedMs == null &&
+            shift.activeRoundId == round.id
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(10), dp(18), dp(10))
+        }
+        val scroll = ScrollView(this).apply { addView(layout) }
+        fun refreshRows() {
+            layout.removeAllViews()
+            val eligible = shift.checkpoints.filter {
+                round.endedMs == null || it.addedAtMs <= round.endedMs!!
+            }
+            val visits = eligible.count { round.checkedCheckpoints.containsKey(it.id) }
+            val summary = TextView(this).apply {
+                text = visits.toString() + "/" + eligible.size +
+                    " checkpoints marked visited. Ticks are manual, not GPS proof."
+                textSize = 13f
+                setTextColor(Color.LTGRAY)
+                setPadding(0, dp(5), 0, dp(12))
+            }
+            layout.addView(summary)
+            if (eligible.isEmpty()) {
+                layout.addView(TextView(this).apply {
+                    text = if (editable) "No checkpoints configured yet. Tap Add checkpoint." else
+                        "No checkpoints were configured during this patrol."
+                    setTextColor(Color.WHITE)
+                })
+            }
+            eligible.forEach { checkpoint ->
+                val timestamp = round.checkedCheckpoints[checkpoint.id]
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(0, dp(5), 0, dp(8))
+                }
+                val tick = CheckBox(this).apply {
+                    text = checkpoint.name
+                    setTextColor(Color.WHITE)
+                    isChecked = timestamp != null
+                    isEnabled = editable
+                }
+                row.addView(tick)
+                if (timestamp != null) row.addView(TextView(this).apply {
+                    text = "Checked " + shortDate(timestamp) + " (manual)"
+                    textSize = 12f
+                    setTextColor(Color.LTGRAY)
+                })
+                layout.addView(row)
+                if (editable) tick.setOnCheckedChangeListener { _, checked ->
+                    if (!checked && timestamp != null) {
+                        AlertDialog.Builder(this)
+                            .setTitle("Remove visit check?")
+                            .setMessage("This clears the recorded check time for " + checkpoint.name + ".")
+                            .setPositiveButton("Remove check") { _, _ ->
+                                try {
+                                    store.markCheckpoint(shift.id, round.id, checkpoint.id, false)
+                                    refreshRows()
+                                } catch (e: Exception) {
+                                    message("Unable to clear check: " + e.message)
+                                    refreshRows()
+                                }
+                            }
+                            .setNegativeButton("Keep checked") { _, _ -> refreshRows() }
+                            .show()
+                    } else {
+                        try {
+                            store.markCheckpoint(shift.id, round.id, checkpoint.id, checked)
+                        } catch (e: Exception) {
+                            message("Unable to save visit: " + e.message)
+                        }
+                        refreshRows()
+                    }
+                }
+            }
+        }
+        refreshRows()
+        val number = shift.rounds.indexOfFirst { it.id == round.id } + 1
+        val builder = AlertDialog.Builder(this)
+            .setTitle("Patrol " + number + " — checkpoints")
+            .setView(scroll)
+            .setPositiveButton("Done", null)
+        if (editable) builder.setNeutralButton("Add checkpoint", null)
+        val dialog = builder.create()
+        dialog.setOnShowListener {
+            if (editable) dialog.getButton(DialogInterface.BUTTON_NEUTRAL).setOnClickListener {
+                val field = EditText(this).apply {
+                    hint = "e.g. Main Gate, Fire Exit A"
+                    setSingleLine(true)
+                    setPadding(dp(16), dp(15), dp(16), dp(15))
+                    filters = arrayOf(InputFilter.LengthFilter(100))
+                }
+                AlertDialog.Builder(this)
+                    .setTitle("Add a site checkpoint")
+                    .setView(field)
+                    .setPositiveButton("Add") { _, _ ->
+                        try {
+                            store.addCheckpoint(shift.id, field.text.toString())
+                            refreshRows()
+                        } catch (e: Exception) {
+                            message(e.message ?: "Cannot add checkpoint")
+                        }
+                    }
+                    .setNegativeButton("Cancel", null)
+                    .show()
+            }
+        }
+        dialog.show()
     }
 
     private fun showShiftReport() {
