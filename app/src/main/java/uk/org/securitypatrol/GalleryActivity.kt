@@ -3,6 +3,8 @@ package uk.org.securitypatrol
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.os.Bundle
+import android.text.InputFilter
+import android.text.InputType
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -11,6 +13,7 @@ import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -140,6 +143,19 @@ class GalleryActivity : AppCompatActivity() {
             action("Update company + site stamps on existing photos") { refreshVisibleStamps() },
             LinearLayout.LayoutParams(-1, dp(48))
         )
+
+        val patrolUtilities = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+        }
+        patrolUtilities.addView(
+            action("Patrol notes") { editPatrolNotes() },
+            LinearLayout.LayoutParams(0, dp(48), 1f)
+        )
+        patrolUtilities.addView(
+            action("Shift report") { showShiftReport() },
+            LinearLayout.LayoutParams(0, dp(48), 1f)
+        )
+        screen.addView(patrolUtilities)
 
         container = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val scroll = ScrollView(this).apply { addView(container) }
@@ -274,6 +290,8 @@ class GalleryActivity : AppCompatActivity() {
                     setImageBitmap(BitmapFactory.decodeFile(path.absolutePath, opt))
                 } else setImageResource(android.R.drawable.ic_menu_gallery)
             }
+            image.contentDescription = "Open larger view of photo taken " + shortDate(photo.timeMs)
+            image.setOnClickListener { showPhotoPreview(photo) }
             row.addView(image, LinearLayout.LayoutParams(dp(82), dp(82)))
             val info = TextView(this).apply {
                 text = shortDate(photo.timeMs) + "\n" + photo.place + "\n" +
@@ -374,6 +392,95 @@ class GalleryActivity : AppCompatActivity() {
                 renderPhotos()
             }
             .setNegativeButton("Keep originals", null).show()
+    }
+
+    private fun showShiftReport() {
+        val shift = currentShift() ?: run {
+            message("No shift to report on")
+            return
+        }
+        ShiftReport.show(this, shift)
+    }
+
+    private fun editPatrolNotes() {
+        val shift = currentShift() ?: run {
+            message("Open a shift first")
+            return
+        }
+        val round = shift.rounds.firstOrNull { it.id == selectedRoundId }
+        if (round == null) {
+            message("Choose one patrol, rather than All patrols, to edit its notes")
+            return
+        }
+        val editor = EditText(this).apply {
+            setText(round.notes)
+            hint = "Observations, doors checked, issues reported..."
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+                InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            minLines = 3
+            maxLines = 7
+            filters = arrayOf(InputFilter.LengthFilter(4000))
+            setPadding(dp(18), dp(12), dp(18), dp(12))
+        }
+        val number = shift.rounds.indexOfFirst { it.id == round.id } + 1
+        AlertDialog.Builder(this)
+            .setTitle("Patrol " + number + " notes")
+            .setMessage("Private notes stored in this shift. Include them in the shift report only if you choose to share it.")
+            .setView(editor)
+            .setPositiveButton("Save notes") { _, _ ->
+                try {
+                    store.updateRoundNotes(shift.id, round.id, editor.text.toString().trim())
+                    message("Patrol " + number + " notes saved")
+                } catch (e: Exception) {
+                    message("Could not save notes: " + e.message)
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showPhotoPreview(photo: PatrolPhoto) {
+        val relative = photo.smallPath ?: run {
+            message("This photograph is still processing")
+            return
+        }
+        val file = File(filesDir, relative)
+        if (!PhotoProcessor.isValidJpeg(file)) {
+            message("The compressed photograph is unavailable")
+            return
+        }
+        val bitmap = try {
+            BitmapFactory.decodeFile(file.absolutePath)
+        } catch (e: Exception) {
+            null
+        }
+        if (bitmap == null) {
+            message("Unable to open the photograph")
+            return
+        }
+        val preview = ImageView(this).apply {
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setImageBitmap(bitmap)
+            setBackgroundColor(Color.BLACK)
+            contentDescription = "Patrol photo showing the company, site, date and GPS stamp"
+        }
+        val height = (resources.displayMetrics.heightPixels * 0.64f).toInt()
+        val wrapper = FrameLayout(this).apply {
+            addView(preview, FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                height
+            ))
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Photo " + shortDate(photo.timeMs))
+            .setView(wrapper)
+            .setPositiveButton("Close", null)
+            .create()
+        dialog.setOnDismissListener {
+            preview.setImageDrawable(null)
+            if (!bitmap.isRecycled) bitmap.recycle()
+        }
+        dialog.show()
     }
 
     private fun refreshVisibleStamps() {

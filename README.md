@@ -2,7 +2,7 @@
 
 An Android-first, offline-capable patrol photography app for security officers who need **fast successive photos**, an accurate UK date/time stamp, location details, smaller files, and quick sharing to workplace WhatsApp groups.
 
-> **Project status:** Android Studio Kotlin/CameraX **v0.1.4 test version source code committed**. The code is an initial proof of concept, **not a verified APK or production-tested app**. Build results, device speed and WhatsApp behaviour still need real testing.
+> **Project status:** Android Studio Kotlin/CameraX **v0.1.5 test version source code committed**. The code is an initial proof of concept, **not a verified APK or production-tested app**. Build results, device speed and WhatsApp behaviour still need real testing.
 
 1. In Android Studio, click **Get from VCS** (or **File → New → Project from Version Control**).
 2. Paste `https://github.com/rbabbit/securityapp.git`, choose a local folder, and click **Clone**.
@@ -12,6 +12,24 @@ An Android-first, offline-capable patrol photography app for security officers w
 6. Grant Camera permission and (optionally) Location permission, start a shift, and try repeated pictures and a small WhatsApp batch.
 
 This repo **is already an Android Studio project**. Do **not** make a second Empty Activity project inside it.
+
+## v0.1.5 — four useful security-shift upgrades
+
+1. **Torch On/Off** beside Next Patrol and Flash, for illuminating a dark checkpoint without closing the camera. Enabling the continuous torch switches the photographic flash mode to Off so the two LED functions do not conflict. Selecting another photographic flash mode turns off the torch first. The torch switches off when the camera screen goes into the background; flash choice is saved, torch state is not.
+2. **Tap a gallery thumbnail to inspect the larger compressed, stamped photograph** in a preview dialog. No opening the system photo gallery, and no copies saved to public image storage.
+3. **Patrol Notes:** the currently selected patrol round has its own optional free-text notes field (up to 4,000 characters), useful for checked doors, observations and incidents. Notes stay private until the officer explicitly shares a shift report. Older shifts retain their photos and get blank notes by default.
+4. **Shift Report:** open a preview covering the chosen shift's company, site, start/end times, patrol-round times, photo counts, manually confirmed sent counts and patrol notes. Tap **Copy text** or **Share report** to send plain text through Android's share screen. This is separate from photo batches and never sends automatically.
+
+Preserved unchanged: rapid-shutter camera, location and UK date/time stamps, company/site watermark, JPEG compression, saved shift records, automatic hourly rounds, photo select-all, previous WhatsApp photo sharing, confirmation of send attempts, and deletion safeguards.
+
+### Test checklist for v0.1.5
+
+- Take rapid pictures while flash is Off; turn torch On and Off while the camera remains open.
+- Test switching from Torch On to Flash On, then back to Flash Off. Check that the torch turns off when leaving the camera.
+- Open a few existing and new stamped photos from the patrol gallery by tapping their thumbnails.
+- Add notes to Patrol 1, change to Patrol 2 and verify notes stay with Patrol 1 after restarting.
+- Open **Shift report**, inspect the local text, then try Copy and optionally Share to a test conversation.
+- When updating, **keep the existing signing key and do not uninstall the old APK** if you have test photos you need to preserve. App-private photos and shift records are removed on uninstall.
 
 ## v0.1.4 — add security company to photo stamp
 

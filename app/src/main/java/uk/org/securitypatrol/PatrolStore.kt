@@ -27,7 +27,8 @@ data class PatrolPhoto(
 data class PatrolRound(
     val id: String,
     val startedMs: Long,
-    var endedMs: Long? = null
+    var endedMs: Long? = null,
+    var notes: String = ""
 )
 
 data class PatrolShift(
@@ -140,6 +141,20 @@ class PatrolStore(context: Context) {
         return round
     }
 
+    /**
+     * Save an officer's optional notes for one specific round of one shift.
+     * Existing photographed evidence, stamps and timestamps are unaffected.
+     */
+    @Synchronized
+    fun updateRoundNotes(shiftId: String, roundId: String, notes: String) {
+        val shift = shifts.firstOrNull { it.id == shiftId }
+            ?: error("Shift not found")
+        val round = shift.rounds.firstOrNull { it.id == roundId }
+            ?: error("Patrol round not found")
+        round.notes = notes.take(4000)
+        save()
+    }
+
     @Synchronized
     fun setActivePlace(value: String) {
         activeShift()?.place = value.trim()
@@ -199,7 +214,7 @@ class PatrolStore(context: Context) {
     @Synchronized
     fun save() {
         val document = JSONObject()
-        document.put("version", 2)
+        document.put("version", 3)
         document.put("activeId", activeId ?: JSONObject.NULL)
         document.put("pendingShareIds", JSONArray(pendingShareIds))
         val items = JSONArray()
@@ -216,6 +231,7 @@ class PatrolStore(context: Context) {
                     JSONObject().put("id", r.id)
                         .put("startedMs", r.startedMs)
                         .put("endedMs", r.endedMs ?: JSONObject.NULL)
+                        .put("notes", r.notes)
                 )
             }
             sj.put("rounds", rounds)
@@ -271,7 +287,8 @@ class PatrolStore(context: Context) {
                     shift.rounds.add(PatrolRound(
                         entry.getString("id"),
                         entry.getLong("startedMs"),
-                        if (entry.isNull("endedMs")) null else entry.optLong("endedMs")
+                        if (entry.isNull("endedMs")) null else entry.optLong("endedMs"),
+                        entry.optString("notes", "")
                     ))
                 }
                 val photos = sj.optJSONArray("photos") ?: JSONArray()

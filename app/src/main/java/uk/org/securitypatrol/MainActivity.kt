@@ -28,6 +28,7 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
@@ -55,7 +56,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var shiftButton: Button
     private lateinit var nextPatrolButton: Button
     private lateinit var flashButton: Button
+    private lateinit var torchButton: Button
     private var imageCapture: ImageCapture? = null
+    private var boundCamera: Camera? = null
+    private var torchEnabled = false
+    private var torchChanging = false
     private var hasFlashUnit = false
     private var flashMode = ImageCapture.FLASH_MODE_OFF
     private val cameraExecutor = Executors.newSingleThreadExecutor()
@@ -123,6 +128,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onPause() {
+        // An officer might switch to WhatsApp or lock the phone: do not leave
+        // the phone torch running in the background.
+        if (torchEnabled || torchChanging) {
+            boundCamera?.cameraControl?.enableTorch(false)
+            torchEnabled = false
+            torchChanging = false
+            updateTorchButton()
+        }
         if (::locationManager.isInitialized) {
             try { locationManager.removeUpdates(locationListener) } catch (_: Exception) { }
         }
@@ -176,13 +189,18 @@ class MainActivity : AppCompatActivity() {
                     this, CameraSelector.DEFAULT_BACK_CAMERA, preview, capture
                 )
                 imageCapture = capture
+                boundCamera = camera
                 hasFlashUnit = camera.cameraInfo.hasFlashUnit()
+                torchEnabled = false
                 updateFlashButton()
+                updateTorchButton()
                 displayState()
             } catch (e: Exception) {
                 cameraStarted = false
+                boundCamera = null
                 hasFlashUnit = false
                 updateFlashButton()
+                updateTorchButton()
                 message("Camera could not start: " + e.message)
             }
         }, ContextCompat.getMainExecutor(this))
@@ -234,11 +252,18 @@ class MainActivity : AppCompatActivity() {
             textSize = 12f
             isEnabled = false // enabled once CameraX confirms a flash unit
         }
+        torchButton = button("Torch: Off") { toggleTorch() }.apply {
+            textSize = 12f
+            isEnabled = false
+        }
         cameraOptions.addView(
             nextPatrolButton, LinearLayout.LayoutParams(0, dp(47), 1f)
         )
         cameraOptions.addView(
             flashButton, LinearLayout.LayoutParams(0, dp(47), 1f)
+        )
+        cameraOptions.addView(
+            torchButton, LinearLayout.LayoutParams(0, dp(47), 1f)
         )
         top.addView(cameraOptions)
         root.addView(top, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
@@ -287,19 +312,88 @@ class MainActivity : AppCompatActivity() {
             .setTitle("Camera flash")
             .setSingleChoiceItems(options, currentIndex) { dialog, which ->
                 val newMode = modes[which]
-                try {
-                    imageCapture?.setFlashMode(newMode)
-                    flashMode = newMode
-                    getSharedPreferences("camera_settings", Context.MODE_PRIVATE)
-                        .edit().putInt("flash_mode", newMode).apply()
-                    updateFlashButton()
+                if (torchChanging) {
+                    message("Torch is still switching. Try again.")
+                } else if (torchEnabled) {
+                    // Turn off continuous light before selecting a photo flash.
+                    setTorch(false) {
+                        applyFlashChoice(newMode)
+                        dialog.dismiss()
+                    }
+                } else {
+                    applyFlashChoice(newMode)
                     dialog.dismiss()
-                } catch (e: Exception) {
-                    message("Could not change flash: " + e.message)
                 }
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    private fun applyFlashChoice(newMode: Int) {
+        try {
+            imageCapture?.setFlashMode(newMode)
+            flashMode = newMode
+            getSharedPreferences("camera_settings", Context.MODE_PRIVATE)
+                .edit().putInt("flash_mode", newMode).apply()
+            updateFlashButton()
+        } catch (e: Exception) {
+            message("Could not change flash: " + e.message)
+        }
+    }
+
+    private fun toggleTorch() {
+        if (!hasFlashUnit || boundCamera == null) {
+            message("The rear camera has no supported torch")
+            return
+        }
+        if (torchChanging) return
+        if (!torchEnabled && flashMode != ImageCapture.FLASH_MODE_OFF) {
+            // The phone LED cannot reliably serve as a continuous torch and a
+            // photographic flash simultaneously; turn photo flash OFF.
+            applyFlashChoice(ImageCapture.FLASH_MODE_OFF)
+        }
+        setTorch(!torchEnabled)
+    }
+
+    private fun setTorch(enabled: Boolean, after: (() -> Unit)? = null) {
+        val camera = boundCamera ?: run {
+            message("Camera not ready")
+            return
+        }
+        if (torchChanging) return
+        torchChanging = true
+        updateTorchButton()
+        try {
+            val future = camera.cameraControl.enableTorch(enabled)
+            future.addListener({
+                try {
+                    // The future is already complete when this listener runs.
+                    future.get()
+                    torchEnabled = enabled
+                    after?.invoke()
+                } catch (e: Exception) {
+                    message("Could not change torch: " + e.message)
+                } finally {
+                    torchChanging = false
+                    updateTorchButton()
+                }
+            }, ContextCompat.getMainExecutor(this))
+        } catch (e: Exception) {
+            torchChanging = false
+            updateTorchButton()
+            message("Could not switch torch: " + e.message)
+        }
+    }
+
+    private fun updateTorchButton() {
+        if (!::torchButton.isInitialized) return
+        torchButton.isEnabled = hasFlashUnit && boundCamera != null && !torchChanging
+        torchButton.text = when {
+            !hasFlashUnit -> "Torch: N/A"
+            torchChanging -> "Torch: ..."
+            torchEnabled -> "Torch: ON"
+            else -> "Torch: Off"
+        }
     }
 
     private fun updateFlashButton() {
