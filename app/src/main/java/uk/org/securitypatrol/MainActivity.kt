@@ -3,11 +3,13 @@ package uk.org.securitypatrol
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.res.ColorStateList
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.text.TextUtils
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
@@ -24,6 +26,8 @@ import android.view.KeyEvent
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.FrameLayout
+import android.widget.ImageButton
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -31,6 +35,8 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.content.res.AppCompatResources
+import androidx.core.graphics.drawable.DrawableCompat
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
@@ -55,14 +61,18 @@ class MainActivity : AppCompatActivity() {
     private lateinit var store: PatrolStore
     private lateinit var previewView: PreviewView
     private lateinit var status: TextView
+    private lateinit var siteText: TextView
     private lateinit var gpsText: TextView
-    private lateinit var shiftButton: Button
     private lateinit var nextPatrolButton: Button
-    private lateinit var flashButton: Button
-    private lateinit var torchButton: Button
+    private lateinit var flashButton: ImageButton
+    private lateinit var torchButton: ImageButton
+    private lateinit var flashLabel: TextView
+    private lateinit var torchLabel: TextView
     private lateinit var cameraTopBar: LinearLayout
+    private lateinit var cameraFooter: LinearLayout
     private lateinit var cameraShortcuts: LinearLayout
     private lateinit var shutterButton: Button
+    private lateinit var sendButton: Button
     private lateinit var lockedHint: TextView
     private var photoOnlyLock = false
     private var lockTouchInProgress = false
@@ -119,10 +129,7 @@ class MainActivity : AppCompatActivity() {
         }
         store = PatrolStore(this)
         locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
-        WindowCompat.getInsetsController(window, window.decorView).apply {
-            isAppearanceLightStatusBars = true
-            isAppearanceLightNavigationBars = true
-        }
+        configureDarkCameraSystemBars()
         buildCameraScreen()
         displayState()
         if (savedInstanceState?.getBoolean("photo_only_lock") == true &&
@@ -160,12 +167,22 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        configureDarkCameraSystemBars()
         if (::store.isInitialized) {
             // Gallery may have changed the same private shift index.
             store = PatrolStore(this)
             displayState()
         }
         if (::locationManager.isInitialized) startLocation()
+        val prefs = getSharedPreferences("camera_settings", Context.MODE_PRIVATE)
+        if (prefs.getBoolean("lock_when_returning", false)) {
+            prefs.edit().remove("lock_when_returning").apply()
+            if (store.activeShift() != null) {
+                setPhotoOnlyLock(true)
+            } else {
+                message("Start a shift first, then use Camera Lock")
+            }
+        }
     }
 
     override fun onPause() {
@@ -255,14 +272,13 @@ class MainActivity : AppCompatActivity() {
         }, ContextCompat.getMainExecutor(this))
     }
 
+    /**
+     * Camera-first layout matching the approved mock-up:
+     * translucent controls over a full live viewfinder, and two bottom actions
+     * placed on ONE row with 30dp non-clickable margins on either edge.
+     */
     private fun buildCameraScreen() {
-        val root = FrameLayout(this)
-        // Android 15+ draws apps edge-to-edge: keep all controls above the system bars.
-        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
-            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
-            insets
-        }
+        val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
         previewView = PreviewView(this).apply {
             implementationMode = PreviewView.ImplementationMode.PERFORMANCE
             scaleType = PreviewView.ScaleType.FILL_CENTER
@@ -271,79 +287,142 @@ class MainActivity : AppCompatActivity() {
 
         cameraTopBar = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(14), dp(10), dp(14), dp(10))
-            setBackgroundColor(Color.WHITE)
+            background = GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                intArrayOf(
+                    Color.argb(238, 0, 0, 0),
+                    Color.argb(210, 0, 0, 0),
+                    Color.argb(135, 0, 0, 0),
+                    Color.TRANSPARENT
+                )
+            )
         }
-        val top = cameraTopBar
-        status = TextView(this).apply {
-            textSize = 17f
-            setTypeface(null, Typeface.BOLD)
-            setTextColor(Color.BLACK)
-            maxLines = 2
-        }
-        gpsText = TextView(this).apply {
-            textSize = 12f
-            setTextColor(Color.DKGRAY)
-        }
-        top.addView(status)
-        top.addView(gpsText)
-        // Only the two essentials on the camera header: shift and patrol.
-        val shiftRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        shiftButton = button("Start shift") { chooseShiftAction() }
-        nextPatrolButton = button("Next patrol") { nextPatrol() }.apply {
-            textSize = 12f
-        }
-        shiftRow.addView(shiftButton, LinearLayout.LayoutParams(0, dp(44), 1f))
-        shiftRow.addView(nextPatrolButton, LinearLayout.LayoutParams(0, dp(44), 1f))
-        top.addView(shiftRow)
-        val cameraOptions = LinearLayout(this).apply {
+        val topRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
         }
-        flashButton = button("Flash: Off") { chooseFlashMode() }.apply {
-            textSize = 12f
-            isEnabled = false // enabled once CameraX confirms a flash unit
+        val settingsIcon = iconControl(R.drawable.ic_patrol_settings, "Settings") {
+            openSettings()
         }
-        torchButton = button("Torch: Off") { toggleTorch() }.apply {
-            textSize = 12f
-            isEnabled = false
+        topRow.addView(settingsIcon, LinearLayout.LayoutParams(dp(44), dp(44)))
+        status = TextView(this).apply {
+            textSize = 18f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.WHITE)
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+            contentDescription = "Current security company"
         }
-        cameraOptions.addView(
-            flashButton, LinearLayout.LayoutParams(0, dp(42), 1f)
-        )
-        cameraOptions.addView(
-            torchButton, LinearLayout.LayoutParams(0, dp(42), 1f)
-        )
-        top.addView(cameraOptions)
-        root.addView(top, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
+        topRow.addView(status, LinearLayout.LayoutParams(0, -2, 1f).apply {
+            marginStart = dp(12)
+            marginEnd = dp(5)
+        })
 
-        val bottom = LinearLayout(this).apply {
+        val flashColumn = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+        }
+        flashButton = iconControl(R.drawable.ic_patrol_flash, "Flash settings") {
+            chooseFlashMode()
+        }
+        flashButton.isEnabled = false
+        flashLabel = miniLabel("OFF")
+        flashColumn.addView(flashButton, LinearLayout.LayoutParams(dp(40), dp(40)))
+        flashColumn.addView(flashLabel)
+        topRow.addView(flashColumn, LinearLayout.LayoutParams(dp(49), -2))
+
+        val torchColumn = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+        }
+        torchButton = iconControl(R.drawable.ic_patrol_torch, "Torch") {
+            toggleTorch()
+        }
+        torchButton.isEnabled = false
+        torchLabel = miniLabel("OFF")
+        torchColumn.addView(torchButton, LinearLayout.LayoutParams(dp(40), dp(40)))
+        torchColumn.addView(torchLabel)
+        topRow.addView(torchColumn, LinearLayout.LayoutParams(dp(49), -2))
+        cameraTopBar.addView(topRow)
+
+        siteText = TextView(this).apply {
+            textSize = 13f
+            setTextColor(Color.rgb(223, 226, 231))
+            maxLines = 2
+            ellipsize = TextUtils.TruncateAt.END
+            setPadding(dp(56), dp(3), 0, 0)
+        }
+        cameraTopBar.addView(siteText)
+        gpsText = TextView(this).apply {
+            textSize = 11.5f
+            setTextColor(Color.rgb(204, 207, 211))
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+            setPadding(dp(56), dp(3), 0, 0)
+        }
+        cameraTopBar.addView(gpsText)
+        root.addView(cameraTopBar, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
+
+        cameraFooter = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(dp(12), dp(10), dp(12), dp(14))
-            setBackgroundColor(Color.WHITE)
+            background = GradientDrawable(
+                GradientDrawable.Orientation.BOTTOM_TOP,
+                intArrayOf(
+                    Color.argb(245, 0, 0, 0),
+                    Color.argb(225, 0, 0, 0),
+                    Color.argb(165, 0, 0, 0),
+                    Color.TRANSPARENT
+                )
+            )
         }
-        lockedHint = TextView(this).apply {
-            text = "CAMERA LOCKED  •  Tap to photograph  •  Hold PHOTO for 2 seconds to unlock"
-            gravity = Gravity.CENTER
+        nextPatrolButton = button("NEXT PATROL  ›") { nextPatrolOrStart() }.apply {
             textSize = 12f
-            setTextColor(Color.BLACK)
-            visibility = View.GONE
-            setPadding(dp(6), dp(4), dp(6), dp(8))
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.WHITE)
+            background = GradientDrawable().apply {
+                setColor(Color.argb(185, 24, 25, 28))
+                setStroke(dp(1), Color.argb(120, 255, 255, 255))
+                cornerRadius = dp(28).toFloat()
+            }
         }
-        bottom.addView(lockedHint, LinearLayout.LayoutParams(-1, -2))
-        // Small monochrome shutter; photo capture still happens without a
-        // full-screen review or photo-processing delay.
-        shutterButton = button("TAKE PHOTO") { takePhoto() }.apply {
-            textSize = 15f
+        cameraFooter.addView(nextPatrolButton, LinearLayout.LayoutParams(dp(168), dp(40)).apply {
+            gravity = Gravity.CENTER_HORIZONTAL
+            bottomMargin = dp(20)
+        })
+
+        lockedHint = TextView(this).apply {
+            text = "CAMERA LOCKED · Hold TAKE PHOTO for 2 seconds to unlock"
+            gravity = Gravity.CENTER
+            textSize = 11f
+            setTextColor(Color.WHITE)
+            visibility = View.GONE
+            setPadding(dp(4), 0, dp(4), dp(12))
+        }
+        cameraFooter.addView(lockedHint, LinearLayout.LayoutParams(-1, -2))
+
+        cameraShortcuts = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            weightSum = 2f
+        }
+        shutterButton = Button(this).apply {
+            isAllCaps = false
+            text = "TAKE PHOTO"
+            textSize = 13f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.BLACK)
+            gravity = Gravity.CENTER
+            setPadding(dp(8), 0, dp(8), 0)
             background = GradientDrawable().apply {
                 setColor(Color.WHITE)
-                setStroke(dp(2), Color.BLACK)
-                cornerRadius = dp(12).toFloat()
+                cornerRadius = dp(40).toFloat()
             }
-            contentDescription = "Take photo; in lock mode hold for two seconds to unlock controls"
+            setTextIcon(this, R.drawable.ic_patrol_camera, Color.BLACK)
+            contentDescription = "Take photo. When camera locked, hold two seconds to unlock."
+            setOnClickListener { takePhoto() }
         }
+        // Preserve the original 2-second hold to unlock feature.
         shutterButton.setOnTouchListener { _, event ->
             if (!photoOnlyLock && !lockTouchInProgress) {
                 false
@@ -356,7 +435,6 @@ class MainActivity : AppCompatActivity() {
                         true
                     }
                     MotionEvent.ACTION_UP -> {
-                        // A long hold unlocks instead of creating an extra photo.
                         val stillLocked = photoOnlyLock
                         lockTouchInProgress = false
                         unlockHandler.removeCallbacks(unlockAction)
@@ -372,36 +450,92 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
-        bottom.addView(shutterButton, LinearLayout.LayoutParams(dp(166), dp(52)).apply {
-            gravity = Gravity.CENTER_HORIZONTAL
-            topMargin = dp(4)
-            bottomMargin = dp(8)
-        })
-        cameraShortcuts = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
+
+        sendButton = Button(this).apply {
+            isAllCaps = false
+            text = "SEND PHOTOS"
+            textSize = 13f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
+            setPadding(dp(8), 0, dp(8), 0)
+            background = GradientDrawable().apply {
+                setColor(Color.rgb(33, 34, 38))
+                setStroke(dp(1), Color.rgb(113, 116, 124))
+                cornerRadius = dp(40).toFloat()
+            }
+            setTextIcon(this, R.drawable.ic_patrol_send, Color.WHITE)
+            contentDescription = "Review and send patrol photos in WhatsApp"
+            setOnClickListener { openGallery() }
         }
-        cameraShortcuts.addView(
-            button("Photos") { openGallery() },
-            LinearLayout.LayoutParams(0, dp(49), 1f)
-        )
-        cameraShortcuts.addView(
-            button("Settings") { openSettings() },
-            LinearLayout.LayoutParams(0, dp(49), 1f)
-        )
-        cameraShortcuts.addView(
-            button("Lock") {
-                if (store.activeShift() == null) {
-                    message("Start a shift before locking the camera")
-                } else {
-                    setPhotoOnlyLock(true)
-                }
-            },
-            LinearLayout.LayoutParams(0, dp(49), 1f)
-        )
-        bottom.addView(cameraShortcuts, LinearLayout.LayoutParams(-1, -2))
-        root.addView(bottom, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
+        cameraShortcuts.addView(shutterButton, LinearLayout.LayoutParams(0, dp(58), 1f).apply {
+            marginEnd = dp(7)
+        })
+        cameraShortcuts.addView(sendButton, LinearLayout.LayoutParams(0, dp(58), 1f).apply {
+            marginStart = dp(7)
+        })
+        cameraFooter.addView(cameraShortcuts, LinearLayout.LayoutParams(-1, -2))
+        root.addView(cameraFooter, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
+
+        // Don't pad the preview: keep it full screen. Only move the controls
+        // away from system bars AND at least 30dp from the touch-prone edges.
+        ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            cameraTopBar.setPadding(
+                dp(22) + bars.left, dp(10) + bars.top,
+                dp(22) + bars.right, dp(20)
+            )
+            cameraFooter.setPadding(
+                dp(30) + bars.left, dp(55),
+                dp(30) + bars.right, dp(22) + bars.bottom
+            )
+            insets
+        }
         setContentView(root)
+    }
+
+    private fun configureDarkCameraSystemBars() {
+        window.statusBarColor = Color.TRANSPARENT
+        window.navigationBarColor = Color.BLACK
+        WindowCompat.getInsetsController(window, window.decorView).apply {
+            isAppearanceLightStatusBars = false
+            isAppearanceLightNavigationBars = false
+        }
+    }
+
+    private fun miniLabel(value: String): TextView = TextView(this).apply {
+        text = value
+        textSize = 10f
+        gravity = Gravity.CENTER
+        setTextColor(Color.rgb(228, 228, 228))
+    }
+
+    private fun iconControl(image: Int, label: String, clicked: () -> Unit): ImageButton =
+        ImageButton(this).apply {
+            setImageResource(image)
+            imageTintList = ColorStateList.valueOf(Color.WHITE)
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            setPadding(dp(10), dp(10), dp(10), dp(10))
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.argb(122, 20, 20, 23))
+                setStroke(dp(1), Color.argb(108, 255, 255, 255))
+            }
+            contentDescription = label
+            setOnClickListener { clicked() }
+        }
+
+    private fun setTextIcon(button: Button, image: Int, tint: Int) {
+        val base = AppCompatResources.getDrawable(this, image)?.mutate() ?: return
+        val drawable = DrawableCompat.wrap(base)
+        DrawableCompat.setTint(drawable, tint)
+        drawable.setBounds(0, 0, dp(18), dp(18))
+        button.setCompoundDrawables(drawable, null, null, null)
+        button.compoundDrawablePadding = dp(7)
+    }
+
+    private fun nextPatrolOrStart() {
+        if (store.activeShift() == null) chooseShiftAction() else nextPatrol()
     }
 
     /** CameraX flash mode applies to subsequent photographs without rebinding. */
@@ -501,22 +635,30 @@ class MainActivity : AppCompatActivity() {
     private fun updateTorchButton() {
         if (!::torchButton.isInitialized) return
         torchButton.isEnabled = hasFlashUnit && boundCamera != null && !torchChanging
-        torchButton.text = when {
-            !hasFlashUnit -> "Torch: N/A"
-            torchChanging -> "Torch: ..."
-            torchEnabled -> "Torch: ON"
-            else -> "Torch: Off"
+        if (::torchLabel.isInitialized) {
+            torchLabel.text = when {
+                !hasFlashUnit -> "N/A"
+                torchChanging -> "..."
+                torchEnabled -> "ON"
+                else -> "OFF"
+            }
         }
+        torchButton.contentDescription = if (torchEnabled) "Torch on, tap to switch off"
+            else "Torch off, tap to switch on"
+        torchButton.alpha = if (torchButton.isEnabled) 1f else 0.48f
     }
 
     private fun updateFlashButton() {
         if (!::flashButton.isInitialized) return
         flashButton.isEnabled = hasFlashUnit && imageCapture != null
-        flashButton.text = if (!hasFlashUnit) "Flash: unavailable" else when (flashMode) {
-            ImageCapture.FLASH_MODE_ON -> "Flash: On"
-            ImageCapture.FLASH_MODE_AUTO -> "Flash: Auto"
-            else -> "Flash: Off"
+        val label = if (!hasFlashUnit) "N/A" else when (flashMode) {
+            ImageCapture.FLASH_MODE_ON -> "ON"
+            ImageCapture.FLASH_MODE_AUTO -> "AUTO"
+            else -> "OFF"
         }
+        if (::flashLabel.isInitialized) flashLabel.text = label
+        flashButton.contentDescription = "Flash " + label + ". Tap to change"
+        flashButton.alpha = if (flashButton.isEnabled) 1f else 0.48f
     }
 
     /**
@@ -526,14 +668,21 @@ class MainActivity : AppCompatActivity() {
     private fun setPhotoOnlyLock(enabled: Boolean) {
         photoOnlyLock = enabled
         cameraTopBar.visibility = if (enabled) View.GONE else View.VISIBLE
-        cameraShortcuts.visibility = if (enabled) View.GONE else View.VISIBLE
+        nextPatrolButton.visibility = if (enabled) View.GONE else View.VISIBLE
+        sendButton.visibility = if (enabled) View.GONE else View.VISIBLE
         lockedHint.visibility = if (enabled) View.VISIBLE else View.GONE
+        cameraShortcuts.gravity = Gravity.CENTER
         if (enabled) {
+            shutterButton.layoutParams = LinearLayout.LayoutParams(dp(190), dp(58))
             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             message("Camera locked. Tap to shoot; hold TAKE PHOTO for 2 seconds to unlock.")
         } else {
+            shutterButton.layoutParams = LinearLayout.LayoutParams(0, dp(58), 1f).apply {
+                marginEnd = dp(7)
+            }
             window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
+        cameraShortcuts.requestLayout()
     }
 
     private fun button(title: String, onClick: () -> Unit): Button = Button(this).apply {
@@ -555,32 +704,23 @@ class MainActivity : AppCompatActivity() {
     private fun displayState() {
         if (!::status.isInitialized) return
         val shift = store.activeShift()
-        if (shift == null) {
-            val company = PatrolPreferences.company(this).ifBlank {
-                store.shifts.firstOrNull()?.company.orEmpty()
-            }
-            val site = PatrolPreferences.site(this).ifBlank {
-                store.shifts.firstOrNull()?.place.orEmpty()
-            }
-            status.text = if (company.isBlank() || site.isBlank()) {
-                "Set your company and site in Settings"
-            } else {
-                company + "  •  " + site + "\nReady to start shift"
-            }
-        } else {
-            val roundNumber = shift.rounds.indexOfFirst { it.id == shift.activeRoundId } + 1
-            val currentPhotos = shift.photos.count { it.roundId == shift.activeRoundId }
-            status.text = shift.company + "  •  " + shift.place + "\n" +
-                "Patrol " + roundNumber.coerceAtLeast(1) + " — " +
-                currentPhotos + " photos (" + shift.photos.size + " shift total)"
+        val company = shift?.company ?: PatrolPreferences.company(this).ifBlank {
+            store.shifts.firstOrNull()?.company.orEmpty()
         }
-        shiftButton.text = if (shift == null) "Start shift" else "End shift"
-        nextPatrolButton.isEnabled = shift != null
+        val site = shift?.place ?: PatrolPreferences.site(this).ifBlank {
+            store.shifts.firstOrNull()?.place.orEmpty()
+        }
+        status.text = company.ifBlank { "Security Patrol" }
+        siteText.text = if (site.isBlank()) "Set your company and site in Settings" else site
+        val number = shift?.rounds?.indexOfFirst { it.id == shift.activeRoundId }?.plus(1)
+            ?.coerceAtLeast(1) ?: 0
+        nextPatrolButton.text = if (shift == null) "START SHIFT  ›"
+            else "PATROL " + number + "  ·  NEXT  ›"
         if (photoOnlyLock && shift == null) setPhotoOnlyLock(false)
         val fix = validFix()
         gpsText.text = when {
-            !PatrolPreferences.gpsEnabled(this) -> "GPS off • Settings"
-            fix == null -> "GPS: waiting for location • photos still work"
+            !PatrolPreferences.gpsEnabled(this) -> "GPS OFF"
+            fix == null -> "GPS: waiting for current location"
             else -> "GPS: " + String.format(java.util.Locale.UK, "%.6f, %.6f  ±%.0f m",
                 fix.latitude, fix.longitude, if (fix.hasAccuracy()) fix.accuracy else 0f)
         }
@@ -657,7 +797,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun takePhoto() {
-        val shift = store.activeShift() ?: run { message("Start a shift before taking photos"); return }
+        val shift = store.activeShift() ?: run {
+            chooseShiftAction()
+            return
+        }
         val capture = imageCapture ?: run { message("Camera is not ready"); return }
         val captureMs = System.currentTimeMillis()
         // Assign the patrol round at shutter time, not later during processing.
