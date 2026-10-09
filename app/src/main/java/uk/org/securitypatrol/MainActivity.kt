@@ -23,8 +23,6 @@ import android.view.WindowManager
 import android.view.KeyEvent
 import android.view.ViewGroup
 import android.widget.Button
-import android.widget.CheckBox
-import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -203,6 +201,12 @@ class MainActivity : AppCompatActivity() {
 
     @SuppressLint("MissingPermission")
     private fun startLocation() {
+        if (!PatrolPreferences.gpsEnabled(this)) {
+            try { locationManager.removeUpdates(locationListener) } catch (_: Exception) {}
+            latestFix = null
+            if (::gpsText.isInitialized) displayState()
+            return
+        }
         if (!hasLocationPermission()) return
         listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER).forEach { provider ->
             try {
@@ -283,16 +287,17 @@ class MainActivity : AppCompatActivity() {
         }
         top.addView(status)
         top.addView(gpsText)
+        // Only the two essentials on the camera header: shift and patrol.
         val shiftRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         shiftButton = button("Start shift") { chooseShiftAction() }
-        shiftRow.addView(shiftButton, LinearLayout.LayoutParams(0, dp(45), 1f))
-        shiftRow.addView(button("Edit place") { editShiftPlace() }, LinearLayout.LayoutParams(0, dp(45), 1f))
+        nextPatrolButton = button("Next patrol") { nextPatrol() }.apply {
+            textSize = 12f
+        }
+        shiftRow.addView(shiftButton, LinearLayout.LayoutParams(0, dp(44), 1f))
+        shiftRow.addView(nextPatrolButton, LinearLayout.LayoutParams(0, dp(44), 1f))
         top.addView(shiftRow)
         val cameraOptions = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-        }
-        nextPatrolButton = button("Next patrol") { nextPatrol() }.apply {
-            textSize = 12f
         }
         flashButton = button("Flash: Off") { chooseFlashMode() }.apply {
             textSize = 12f
@@ -303,13 +308,10 @@ class MainActivity : AppCompatActivity() {
             isEnabled = false
         }
         cameraOptions.addView(
-            nextPatrolButton, LinearLayout.LayoutParams(0, dp(47), 1f)
+            flashButton, LinearLayout.LayoutParams(0, dp(42), 1f)
         )
         cameraOptions.addView(
-            flashButton, LinearLayout.LayoutParams(0, dp(47), 1f)
-        )
-        cameraOptions.addView(
-            torchButton, LinearLayout.LayoutParams(0, dp(47), 1f)
+            torchButton, LinearLayout.LayoutParams(0, dp(42), 1f)
         )
         top.addView(cameraOptions)
         root.addView(top, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
@@ -332,7 +334,7 @@ class MainActivity : AppCompatActivity() {
         // Small monochrome shutter; photo capture still happens without a
         // full-screen review or photo-processing delay.
         shutterButton = button("TAKE PHOTO") { takePhoto() }.apply {
-            textSize = 17f
+            textSize = 15f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.BLACK)
             background = GradientDrawable().apply {
@@ -370,7 +372,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
-        bottom.addView(shutterButton, LinearLayout.LayoutParams(dp(194), dp(58)).apply {
+        bottom.addView(shutterButton, LinearLayout.LayoutParams(dp(166), dp(52)).apply {
             gravity = Gravity.CENTER_HORIZONTAL
             topMargin = dp(4)
             bottomMargin = dp(8)
@@ -380,15 +382,15 @@ class MainActivity : AppCompatActivity() {
             gravity = Gravity.CENTER
         }
         cameraShortcuts.addView(
-            button("Patrol photos") { openGallery() },
+            button("Photos") { openGallery() },
             LinearLayout.LayoutParams(0, dp(49), 1f)
         )
         cameraShortcuts.addView(
-            button("Send patrol") { shareCurrent() },
+            button("Settings") { openSettings() },
             LinearLayout.LayoutParams(0, dp(49), 1f)
         )
         cameraShortcuts.addView(
-            button("LOCK CAMERA") {
+            button("Lock") {
                 if (store.activeShift() == null) {
                     message("Start a shift before locking the camera")
                 } else {
@@ -554,7 +556,17 @@ class MainActivity : AppCompatActivity() {
         if (!::status.isInitialized) return
         val shift = store.activeShift()
         if (shift == null) {
-            status.text = "No shift started"
+            val company = PatrolPreferences.company(this).ifBlank {
+                store.shifts.firstOrNull()?.company.orEmpty()
+            }
+            val site = PatrolPreferences.site(this).ifBlank {
+                store.shifts.firstOrNull()?.place.orEmpty()
+            }
+            status.text = if (company.isBlank() || site.isBlank()) {
+                "Set your company and site in Settings"
+            } else {
+                company + "  •  " + site + "\nReady to start shift"
+            }
         } else {
             val roundNumber = shift.rounds.indexOfFirst { it.id == shift.activeRoundId } + 1
             val currentPhotos = shift.photos.count { it.roundId == shift.activeRoundId }
@@ -566,12 +578,16 @@ class MainActivity : AppCompatActivity() {
         nextPatrolButton.isEnabled = shift != null
         if (photoOnlyLock && shift == null) setPhotoOnlyLock(false)
         val fix = validFix()
-        gpsText.text = if (fix == null) "GPS: waiting for a current location (photos still work)" else
-            "GPS: " + String.format(java.util.Locale.UK, "%.6f, %.6f  ±%.0f m",
+        gpsText.text = when {
+            !PatrolPreferences.gpsEnabled(this) -> "GPS off • Settings"
+            fix == null -> "GPS: waiting for location • photos still work"
+            else -> "GPS: " + String.format(java.util.Locale.UK, "%.6f, %.6f  ±%.0f m",
                 fix.latitude, fix.longitude, if (fix.hasAccuracy()) fix.accuracy else 0f)
+        }
     }
 
     private fun validFix(): Location? {
+        if (!PatrolPreferences.gpsEnabled(this)) return null
         val loc = latestFix ?: return null
         val ageNs = SystemClock.elapsedRealtimeNanos() - loc.elapsedRealtimeNanos
         return if (ageNs in 0L..120_000_000_000L) loc else null
@@ -580,48 +596,43 @@ class MainActivity : AppCompatActivity() {
     private fun chooseShiftAction() {
         val shift = store.activeShift()
         if (shift != null) {
-            AlertDialog.Builder(this).setTitle("End shift?")
-                .setMessage("Photos remain saved in the app, even after ending this shift.")
-                .setPositiveButton("End shift") { _, _ -> store.endShift(); displayState() }
+            AlertDialog.Builder(this).setTitle("End this shift?")
+                .setMessage("Your photographs and hourly patrols remain saved inside the app.")
+                .setPositiveButton("End shift") { _, _ ->
+                    store.endShift()
+                    displayState()
+                }
                 .setNegativeButton("Cancel", null).show()
             return
         }
-        val previous = store.shifts.firstOrNull()
-        val editor = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(22), dp(10), dp(22), dp(4))
+        val company = PatrolPreferences.company(this).ifBlank {
+            store.shifts.firstOrNull()?.company.orEmpty()
         }
-        val companyField = EditText(this).apply {
-            hint = "Company (e.g. BOX Security)"
-            setSingleLine(true)
-            setText(previous?.company.orEmpty())
+        val site = PatrolPreferences.site(this).ifBlank {
+            store.shifts.firstOrNull()?.place.orEmpty()
         }
-        val placeField = EditText(this).apply {
-            hint = "Site / address (editable)"
-            setSingleLine(false)
-            setText(previous?.place.orEmpty())
+        if (company.isBlank() || site.isBlank()) {
+            message("Enter your company and site in Settings first")
+            openSettings()
+            return
         }
-        editor.addView(companyField)
-        editor.addView(placeField)
-        val autoHourly = CheckBox(this).apply {
-            text = "Automatically group hourly patrols"
-            isChecked = true
-            setTextColor(Color.WHITE)
-        }
-        editor.addView(autoHourly)
-        AlertDialog.Builder(this).setTitle("Start a security shift")
-            .setView(editor)
+        AlertDialog.Builder(this)
+            .setTitle("Start shift?")
+            .setMessage(company + "\n" + site + "\n\nHourly patrol grouping: " +
+                if (PatrolPreferences.autoHourly(this)) "On" else "Off")
             .setPositiveButton("Start") { _, _ ->
-                val company = companyField.text.toString().trim()
-                val place = placeField.text.toString().trim()
-                if (company.isEmpty() || place.isEmpty()) {
-                    message("Company and site name are required")
-                } else {
-                    try { store.startShift(company, place, autoHourly.isChecked); displayState() }
-                    catch (e: Exception) { message(e.message ?: "Cannot start shift") }
+                try {
+                    if (PatrolPreferences.company(this).isBlank()) {
+                        PatrolPreferences.saveProfile(this, company, site)
+                    }
+                    store.startShift(company, site, PatrolPreferences.autoHourly(this))
+                    displayState()
+                } catch (e: Exception) {
+                    message(e.message ?: "Cannot start shift")
                 }
             }
-            .setNegativeButton("Cancel", null).show()
+            .setNegativeButton("Settings") { _, _ -> openSettings() }
+            .show()
     }
 
     private fun nextPatrol() {
@@ -643,22 +654,6 @@ class MainActivity : AppCompatActivity() {
             }
             .setNegativeButton("Cancel", null)
             .show()
-    }
-
-    private fun editShiftPlace() {
-        val shift = store.activeShift() ?: run { message("Start a shift first"); return }
-        val field = EditText(this).apply {
-            setText(shift.place)
-            selectAll()
-            setPadding(dp(18), dp(15), dp(18), dp(15))
-        }
-        AlertDialog.Builder(this).setTitle("Site / place name")
-            .setMessage("This is your editable label, separate from measured GPS coordinates. Applies to new photos.")
-            .setView(field)
-            .setPositiveButton("Save") { _, _ ->
-                val name = field.text.toString().trim()
-                if (name.isNotEmpty()) { store.setActivePlace(name); displayState() }
-            }.setNegativeButton("Cancel", null).show()
     }
 
     private fun takePhoto() {
@@ -723,14 +718,8 @@ class MainActivity : AppCompatActivity() {
         startActivity(Intent(this, GalleryActivity::class.java))
     }
 
-    private fun shareCurrent() {
-        val shift = store.activeShift() ?: run { message("Start a shift first"); return }
-        val roundId = shift.activeRoundId
-        val unsent = shift.photos.filter {
-            it.roundId == roundId && !it.confirmedSent && it.smallPath != null
-        }
-        if (unsent.isEmpty()) { message("No unconfirmed photos in the current patrol are ready"); return }
-        ShareHelper.share(this, store, unsent)
+    private fun openSettings() {
+        startActivity(Intent(this, SettingsActivity::class.java))
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {

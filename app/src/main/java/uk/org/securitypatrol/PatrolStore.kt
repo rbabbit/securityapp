@@ -229,6 +229,25 @@ class PatrolStore(context: Context) {
         save()
     }
 
+    /**
+     * Delete ONLY selected, fully processed photographs. Remove their
+     * metadata atomically first; the UI then removes the app-private files.
+     * Existing patrol rounds, other pictures and previous shifts are kept.
+     */
+    @Synchronized
+    fun removePhotos(shiftId: String, photoIds: Set<String>): List<PatrolPhoto> {
+        val shift = shifts.firstOrNull { it.id == shiftId } ?: return emptyList()
+        val removed = shift.photos.filter {
+            it.id in photoIds && it.basePath != null && it.smallPath != null
+        }
+        if (removed.isEmpty()) return emptyList()
+        val removing = removed.map { it.id }.toSet()
+        shift.photos.removeAll { it.id in removing }
+        pendingShareIds = pendingShareIds.filterNot { it in removing }
+        save()
+        return removed
+    }
+
     @Synchronized
     fun findPhoto(id: String): PatrolPhoto? =
         shifts.asSequence().flatMap { it.photos.asSequence() }.firstOrNull { it.id == id }

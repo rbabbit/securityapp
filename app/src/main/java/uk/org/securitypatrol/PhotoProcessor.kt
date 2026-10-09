@@ -31,7 +31,7 @@ object PhotoProcessor {
         base.parentFile?.mkdirs()
         small.parentFile?.mkdirs()
         FileOutputStream(base).use { check(bitmap.compress(Bitmap.CompressFormat.JPEG, 80, it)) }
-        stampAndSave(bitmap, photo, small, company)
+        stampAndSave(bitmap, photo, small, company, PatrolPreferences.jpegQuality(context))
         bitmap.recycle()
         require(isValidJpeg(small) && isValidJpeg(base)) { "Compressed photo validation failed" }
         return baseRel to smallRel
@@ -46,7 +46,7 @@ object PhotoProcessor {
         val bitmap = BitmapFactory.decodeFile(base.absolutePath) ?: error("Cannot decode base JPEG")
         val revised = photo.copy(place = newPlace)
         val replacement = File(small.parentFile, small.name + ".tmp")
-        stampAndSave(bitmap, revised, replacement, company)
+        stampAndSave(bitmap, revised, replacement, company, PatrolPreferences.jpegQuality(context))
         bitmap.recycle()
         require(isValidJpeg(replacement)) { "Revised JPEG is invalid" }
         // Replacing the small file never removes the preserved un-stamped base.
@@ -88,7 +88,7 @@ object PhotoProcessor {
         }
     }
 
-    private fun stampAndSave(source: Bitmap, photo: PatrolPhoto, destination: File, company: String) {
+    private fun stampAndSave(source: Bitmap, photo: PatrolPhoto, destination: File, company: String, quality: Int) {
         val output = source.copy(Bitmap.Config.ARGB_8888, true)
         val canvas = Canvas(output)
         val textSize = max(19f, output.width / 39f)
@@ -123,7 +123,7 @@ object PhotoProcessor {
         lines.forEachIndexed { index, value ->
             canvas.drawText(fit(value, pen, maxWidth), left, areaTop + padding + line * (index + 0.83f), pen)
         }
-        FileOutputStream(destination).use { check(output.compress(Bitmap.CompressFormat.JPEG, 79, it)) }
+        FileOutputStream(destination).use { check(output.compress(Bitmap.CompressFormat.JPEG, quality, it)) }
         output.recycle()
     }
 
