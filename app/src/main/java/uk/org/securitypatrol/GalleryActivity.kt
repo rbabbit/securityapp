@@ -19,6 +19,9 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -35,6 +38,7 @@ class GalleryActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         store = PatrolStore(this)
         buildUi()
     }
@@ -50,7 +54,16 @@ class GalleryActivity : AppCompatActivity() {
     private fun buildUi() {
         val screen = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(12), dp(12), dp(12), dp(6))
+        }
+        // Prevent shift controls and the final photograph row from overlapping
+        // the status / navigation bars on edge-to-edge Android devices.
+        ViewCompat.setOnApplyWindowInsetsListener(screen) { view, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            view.setPadding(
+                dp(12) + bars.left, dp(12) + bars.top,
+                dp(12) + bars.right, dp(6) + bars.bottom
+            )
+            insets
         }
         val title = TextView(this).apply {
             text = "Patrol Photos & Shift Records"

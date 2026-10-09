@@ -11,6 +11,7 @@ import android.graphics.drawable.GradientDrawable
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.media.MediaActionSound
 import android.os.Bundle
 import android.os.Looper
 import android.os.SystemClock
@@ -33,6 +34,9 @@ import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.Executors
@@ -54,6 +58,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var locationManager: LocationManager
     private var latestFix: Location? = null
     private var cameraStarted = false
+    // Preloaded Android shutter sound; the camera stays on screen during capture.
+    private val shutterSound = MediaActionSound()
 
     private val locationListener = LocationListener { location ->
         // Keep only the newest location update, across GPS and network providers.
@@ -73,6 +79,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        shutterSound.load(MediaActionSound.SHUTTER_CLICK)
         store = PatrolStore(this)
         locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
         buildCameraScreen()
@@ -109,6 +117,7 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         cameraExecutor.shutdown()
         imageProcessor.shutdown()
+        shutterSound.release()
         super.onDestroy()
     }
 
@@ -160,6 +169,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun buildCameraScreen() {
         val root = FrameLayout(this)
+        // Android 15+ draws apps edge-to-edge: keep all controls above the system bars.
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            insets
+        }
         previewView = PreviewView(this).apply {
             implementationMode = PreviewView.ImplementationMode.PERFORMANCE
             scaleType = PreviewView.ScaleType.FILL_CENTER
@@ -168,7 +183,7 @@ class MainActivity : AppCompatActivity() {
 
         val top = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(14), dp(32), dp(14), dp(14))
+            setPadding(dp(14), dp(12), dp(14), dp(14))
             setBackgroundColor(Color.argb(205, 11, 25, 41))
         }
         status = TextView(this).apply {
@@ -341,6 +356,9 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             )
+            // An immediate, short audible click on each accepted shutter press,
+            // including the phone's volume-key shortcut. No processing delay.
+            shutterSound.play(MediaActionSound.SHUTTER_CLICK)
         } catch (e: Exception) {
             message("Unable to capture: " + e.message)
         }

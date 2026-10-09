@@ -2,7 +2,7 @@
 
 An Android-first, offline-capable patrol photography app for security officers who need **fast successive photos**, an accurate UK date/time stamp, location details, smaller files, and quick sharing to workplace WhatsApp groups.
 
-> **Project status:** Android Studio Kotlin/CameraX **v0.1 starter source code committed**. The code is an initial proof of concept, **not a verified APK or production-tested app**. Build results, device speed and WhatsApp behaviour still need real testing.
+> **Project status:** Android Studio Kotlin/CameraX **v0.1.1 test version source code committed**. The code is an initial proof of concept, **not a verified APK or production-tested app**. Build results, device speed and WhatsApp behaviour still need real testing.
 
 1. In Android Studio, click **Get from VCS** (or **File → New → Project from Version Control**).
 2. Paste `https://github.com/rbabbit/securityapp.git`, choose a local folder, and click **Clone**.
@@ -12,6 +12,13 @@ An Android-first, offline-capable patrol photography app for security officers w
 6. Grant Camera permission and (optionally) Location permission, start a shift, and try repeated pictures and a small WhatsApp batch.
 
 This repo **is already an Android Studio project**. Do **not** make a second Empty Activity project inside it.
+
+## Small test fixes in v0.1.1
+
+- Camera and shift/gallery controls now apply Android system-bar insets, so bottom buttons stay above the navigation bar, including on Android 15+ phones.
+- The photo-sharing popup now actually shows **WhatsApp**, **WhatsApp Business** and **Other apps**; the previous dialog mistakenly combined message text and a list of options.
+- Short Android shutter-click sound plays immediately when the shutter is pressed, including the hardware volume-button shortcut. Its loudness depends on the phone's sound settings.
+- No changes to local shift records, photo storage, compression or application ID; updating over v0.1 should preserve those app files.
 
 ## Features in v0.1 source
 
