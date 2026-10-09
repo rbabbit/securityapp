@@ -47,12 +47,22 @@ object ShareHelper {
                     if (which == 1) setPackage("com.whatsapp.w4b")
                 }
                 try {
+                    // The TEST helper can inspect only an exposed WhatsApp chat
+                    // title, only for two minutes after this explicit share.
+                    // It never sees other apps or changes what WhatsApp sends.
+                    if (which == 0 || which == 1) {
+                        WhatsAppTitleHelper.armIfEnabled(
+                            activity, if (which == 0) "com.whatsapp" else "com.whatsapp.w4b"
+                        )
+                    }
                     if (which == 2) activity.startActivity(Intent.createChooser(intent, "Send patrol photos"))
                     else activity.startActivity(intent)
                     store.noteShareAttempt(ids)
                 } catch (ex: ActivityNotFoundException) {
+                    WhatsAppTitleHelper.cancelPending(activity)
                     Toast.makeText(activity, "WhatsApp option not installed; choose Other apps", Toast.LENGTH_LONG).show()
                 } catch (ex: Exception) {
+                    WhatsAppTitleHelper.cancelPending(activity)
                     Toast.makeText(activity, "Could not open sharing: " + ex.message, Toast.LENGTH_LONG).show()
                 }
             }.setNegativeButton("Cancel", null).show()
