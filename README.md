@@ -1,4 +1,24 @@
-# Security Patrol Camera — v0.1.8
+# Security Patrol Camera — v0.1.9
+
+## New in v0.1.9 — approved camera mockup implemented
+
+- The camera preview now fills the screen behind a subtle dark translucent top/bottom overlay (no giant white controls covering the viewfinder).
+- Top-left **Settings gear** icon. Top-right small **Flash** and **Torch** icons with their Off / On / Auto state beneath.
+- The security **company, site and GPS** appear neatly over the preview.
+- A small central **Start Shift / Next Patrol** pill sits just above the bottom actions; tapping it starts the shift or moves to the next round. To **End Shift**, open Settings and confirm.
+- The only two main actions on the home screen are **TAKE PHOTO** (white with a camera icon) and **SEND PHOTOS** (dark with a send icon) **side by side on one line**.
+- Both bottom buttons have **at least 30dp of inactive horizontal space at the screen edges** plus 14dp between them. Touching the margins does not activate either button, reducing accidental presses while holding the phone.
+- **SEND PHOTOS** opens the existing gallery with unsent photos preselected; you choose the recipient and confirm the final Send inside WhatsApp, so the app never sends accidentally.
+- **Camera Lock** remains available under Settings: while active only TAKE PHOTO is visible. Hold TAKE PHOTO for two seconds to unlock.
+- Retains the proven CameraX fast shutter, UK photo stamps, GPS accuracy, compression, hourly rounds, local app storage, shutter sound, WhatsApp batches, and backup/export.
+- The previous main branch is backed up as `archive/v0.1.8-three-screens`.
+- The automated build verifies compilation, but real-device layout and rapid-photo handling must still be tested before relying on the redesigned UI at work.
+
+**Safety:** Uninstalling the app deletes private photos and shifts. Update using the **same signing key**. If Android refuses to install an update, export anything important before making changes; ZIP import into the app is not yet implemented.
+
+---
+
+## v0.1.8 functionality
 
 A simple offline-first Android app for security guards who need to take many stamped photographs quickly and send a patrol batch to WhatsApp.
 
