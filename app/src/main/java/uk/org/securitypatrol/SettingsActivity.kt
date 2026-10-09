@@ -124,7 +124,8 @@ class SettingsActivity : AppCompatActivity() {
         body.addView(siteField)
         body.addView(button("Previously used company / site") { choosePreviousSite() })
         body.addView(button("Save company and site") { saveCompanyAndSite() })
-        body.addView(note("Changing this doesn't alter an existing shift. End the current shift before changing employers."))
+        body.addView(note("These labels change future shifts, not existing photographs."))
+        body.addView(button("End current shift") { confirmEndShift() })
 
         body.addView(section("Camera"))
         gpsCheck = CheckBox(this).apply {
@@ -150,7 +151,9 @@ class SettingsActivity : AppCompatActivity() {
                 PatrolPreferences.setAutoHourly(this@SettingsActivity, enabled)
             }
         })
-        body.addView(note("UK timestamp (GMT/BST) is always printed on photos. Hourly grouping applies when you start a new shift."))
+        body.addView(note("UK timestamps are always printed on photos. Hourly grouping applies to a new shift."))
+        body.addView(button("Lock camera controls") { lockCameraOnReturn() })
+        body.addView(note("Photo-only lock hides every control except TAKE PHOTO. Hold the photo button for 2 seconds to unlock."))
 
         body.addView(section("Compressed photo size"))
         val qualityGroup = RadioGroup(this).apply { orientation = RadioGroup.VERTICAL }
@@ -192,6 +195,35 @@ class SettingsActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         if (::storageText.isInitialized) refreshStorage()
+    }
+
+    private fun confirmEndShift() {
+        val fresh = PatrolStore(this)
+        val active = fresh.activeShift() ?: run {
+            toast("No shift is currently active")
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("End the current shift?")
+            .setMessage(active.company + " — " + active.place +
+                "\nYour photographs and patrol history will remain saved.")
+            .setPositiveButton("End shift") { _, _ ->
+                fresh.endShift()
+                toast("Shift ended and saved")
+                finish()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun lockCameraOnReturn() {
+        if (PatrolStore(this).activeShift() == null) {
+            toast("Start a shift on the Camera screen first")
+            return
+        }
+        getSharedPreferences("camera_settings", MODE_PRIVATE)
+            .edit().putBoolean("lock_when_returning", true).apply()
+        finish()
     }
 
     private fun saveCompanyAndSite() {
