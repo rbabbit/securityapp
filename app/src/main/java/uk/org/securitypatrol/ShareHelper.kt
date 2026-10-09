@@ -31,6 +31,7 @@ object ShareHelper {
         val options = arrayOf(
             "WhatsApp",
             "WhatsApp Business",
+            "Recent WhatsApp chats (TEST)",
             "Other apps"
         )
         AlertDialog.Builder(activity)
@@ -43,15 +44,25 @@ object ShareHelper {
                         uris.drop(1).forEach { clip.addItem(ClipData.Item(it)) }
                     }
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    if (which == 0) setPackage("com.whatsapp")
+                    // WhatsApp-only chooser: Android may offer Direct Share
+                    // shortcuts to recent groups/contacts, but WhatsApp is not
+                    // required to expose any. Other apps stays unrestricted.
+                    if (which == 0 || which == 2) setPackage("com.whatsapp")
                     if (which == 1) setPackage("com.whatsapp.w4b")
                 }
                 try {
-                    if (which == 2) activity.startActivity(Intent.createChooser(intent, "Send patrol photos"))
-                    else activity.startActivity(intent)
+                    when (which) {
+                        2 -> activity.startActivity(
+                            Intent.createChooser(intent, "Recent WhatsApp chats (test)")
+                        )
+                        3 -> activity.startActivity(
+                            Intent.createChooser(intent, "Send patrol photos")
+                        )
+                        else -> activity.startActivity(intent)
+                    }
                     store.noteShareAttempt(ids)
                 } catch (ex: ActivityNotFoundException) {
-                    Toast.makeText(activity, "WhatsApp option not installed; choose Other apps", Toast.LENGTH_LONG).show()
+                    Toast.makeText(activity, "That sharing app is unavailable; try Other apps", Toast.LENGTH_LONG).show()
                 } catch (ex: Exception) {
                     Toast.makeText(activity, "Could not open sharing: " + ex.message, Toast.LENGTH_LONG).show()
                 }

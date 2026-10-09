@@ -1,4 +1,26 @@
-# Security Patrol Camera — v0.1.10
+# Security Patrol Camera — v0.1.11 (Direct Share test)
+
+## v0.1.11 — test Android Direct Share suggestions
+
+- In **Photos → Send selected**, the popup now has a temporary fourth option: **Recent WhatsApp chats (TEST)**.
+- It opens Android's **system Sharesheet** using the **same correctly permissioned multi-image attachments** as our working WhatsApp option, but limits the app destination to WhatsApp.
+- If WhatsApp publishes compatible Direct Share shortcuts for the photographed content, Android **may** suggest recent contacts or groups (such as your test Pizza group). It may also show just WhatsApp and no groups. **This cannot be forced or guaranteed by Security Patrol**.
+- Compare **Recent WhatsApp chats (TEST)** against **Other apps**. The latter already invokes Android's unrestricted Sharesheet; it is retained without changes.
+- The original **WhatsApp** and **WhatsApp Business** choices still launch exactly as before. Only the test option is new. In WhatsApp, always check the recipient and press Send yourself.
+- No last group name, identifier, chat history or delivery status is retrieved from WhatsApp. We still require manual confirmation before photos are marked as sent.
+- All photo capture, timestamps, company/site, GPS, local shift records and safety controls are unchanged.
+- You can revert to the stable branch or choose the ordinary WhatsApp option if the test path offers no benefit.
+
+### Test on your Android phone
+
+1. Take 2–4 harmless test photos in a test shift.
+2. Open **SEND PHOTOS → SEND SELECTED TO WHATSAPP**. Choose **Recent WhatsApp chats (TEST)**.
+3. Look for a row of suggested contacts/groups. Does **Pizza** appear? Do not assume any suggestion identifies the correct recipient without checking.
+4. If it does, tap **Pizza**, review the attached photos, and manually send. If it does not, try **Other apps** and compare the suggestions.
+5. Tell me whether either route showed Pizza and whether the images actually arrived. A screenshot of the Sharesheet helps.
+6. **Do not uninstall** the current app to install a GitHub debug APK if it contains photos you need. APK updates depend on using the same signing key, and uninstall removes app-private data.
+
+
 
 ## v0.1.10 — cleaner sharing popup
 
