@@ -3,6 +3,7 @@ package uk.org.securitypatrol
 import android.content.DialogInterface
 import android.graphics.BitmapFactory
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.text.InputFilter
 import android.text.InputType
@@ -89,6 +90,10 @@ class GalleryActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        WindowCompat.getInsetsController(window, window.decorView).apply {
+            isAppearanceLightStatusBars = true
+            isAppearanceLightNavigationBars = true
+        }
         exportShiftId = savedInstanceState?.getString("exportShiftId")
         exportOriginals = savedInstanceState?.getBoolean("exportOriginals") ?: false
         store = PatrolStore(this)
@@ -112,6 +117,7 @@ class GalleryActivity : AppCompatActivity() {
     private fun buildUi() {
         val screen = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.WHITE)
         }
         // Prevent shift controls and the final photograph row from overlapping
         // the status / navigation bars on edge-to-edge Android devices.
@@ -126,7 +132,7 @@ class GalleryActivity : AppCompatActivity() {
         val title = TextView(this).apply {
             text = "Patrol Photos & Shift Records"
             textSize = 23f
-            setTextColor(Color.WHITE)
+            setTextColor(Color.BLACK)
             setPadding(0, dp(6), 0, dp(9))
         }
         screen.addView(title)
@@ -168,7 +174,7 @@ class GalleryActivity : AppCompatActivity() {
         screen.addView(heading)
         selectionStatus = TextView(this).apply {
             textSize = 13f
-            setTextColor(Color.LTGRAY)
+            setTextColor(Color.DKGRAY)
             setPadding(0, dp(3), 0, dp(6))
         }
         screen.addView(selectionStatus)
@@ -330,7 +336,7 @@ class GalleryActivity : AppCompatActivity() {
                 val headingText = TextView(this).apply {
                     text = "PATROL " + roundNumber.coerceAtLeast(1) +
                         "  •  " + (round?.let { shortTime(it.startedMs) } ?: shortTime(photo.timeMs))
-                    setTextColor(Color.WHITE)
+                    setTextColor(Color.BLACK)
                     textSize = 15f
                     setPadding(dp(7), dp(12), dp(7), dp(7))
                 }
@@ -396,7 +402,7 @@ class GalleryActivity : AppCompatActivity() {
             )
             panel.addView(photoActions)
             container.addView(panel)
-            val rule = View(this).apply { setBackgroundColor(Color.DKGRAY) }
+            val rule = View(this).apply { setBackgroundColor(Color.LTGRAY) }
             container.addView(rule, LinearLayout.LayoutParams(-1, dp(1)))
         }
     }
@@ -526,7 +532,7 @@ class GalleryActivity : AppCompatActivity() {
                 text = visits.toString() + "/" + eligible.size +
                     " checkpoints marked visited. Ticks are manual, not GPS proof."
                 textSize = 13f
-                setTextColor(Color.LTGRAY)
+                setTextColor(Color.DKGRAY)
                 setPadding(0, dp(5), 0, dp(12))
             }
             layout.addView(summary)
@@ -534,7 +540,7 @@ class GalleryActivity : AppCompatActivity() {
                 layout.addView(TextView(this).apply {
                     text = if (editable) "No checkpoints configured yet. Tap Add checkpoint." else
                         "No checkpoints were configured during this patrol."
-                    setTextColor(Color.WHITE)
+                    setTextColor(Color.BLACK)
                 })
             }
             eligible.forEach { checkpoint ->
@@ -545,7 +551,7 @@ class GalleryActivity : AppCompatActivity() {
                 }
                 val tick = CheckBox(this).apply {
                     text = checkpoint.name
-                    setTextColor(Color.WHITE)
+                    setTextColor(Color.BLACK)
                     isChecked = timestamp != null
                     isEnabled = editable
                 }
@@ -553,7 +559,7 @@ class GalleryActivity : AppCompatActivity() {
                 if (timestamp != null) row.addView(TextView(this).apply {
                     text = "Checked " + shortDate(timestamp) + " (manual)"
                     textSize = 12f
-                    setTextColor(Color.LTGRAY)
+                    setTextColor(Color.DKGRAY)
                 })
                 layout.addView(row)
                 if (editable) tick.setOnCheckedChangeListener { _, checked ->
@@ -783,6 +789,13 @@ class GalleryActivity : AppCompatActivity() {
         this.text = text
         isAllCaps = false
         textSize = 11f
+        setTextColor(Color.BLACK)
+        background = GradientDrawable().apply {
+            setColor(Color.WHITE)
+            setStroke(dp(1), Color.BLACK)
+            cornerRadius = dp(9).toFloat()
+        }
+        setPadding(dp(4), dp(4), dp(4), dp(4))
         setOnClickListener { clicked() }
     }
     private fun dp(value: Int) = (value * resources.displayMetrics.density + 0.5f).toInt()

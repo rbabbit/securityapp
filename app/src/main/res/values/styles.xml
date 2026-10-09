@@ -1,13 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="PatrolTheme" parent="Theme.AppCompat.NoActionBar">
-        <item name="colorPrimary">#183C5A</item>
-        <item name="colorPrimaryDark">#102B44</item>
-        <item name="colorAccent">#2C87AF</item>
-        <item name="android:windowBackground">#10202B</item>
-        <item name="android:textColorPrimary">#FFFFFF</item>
-        <item name="android:textColorSecondary">#D2DCE5</item>
-        <item name="android:statusBarColor">#10202B</item>
-        <item name="android:navigationBarColor">#10202B</item>
+    <style name="PatrolTheme" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="colorPrimary">#000000</item>
+        <item name="colorPrimaryDark">#FFFFFF</item>
+        <item name="colorAccent">#000000</item>
+        <item name="android:colorAccent">#000000</item>
+        <item name="android:windowBackground">#FFFFFF</item>
+        <item name="android:textColorPrimary">#111111</item>
+        <item name="android:textColorSecondary">#444444</item>
+        <item name="android:statusBarColor">#FFFFFF</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:navigationBarColor">#FFFFFF</item>
+        <item name="android:windowLightNavigationBar">true</item>
     </style>
 </resources>
