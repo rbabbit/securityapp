@@ -2,7 +2,40 @@
 
 An Android-first, offline-capable patrol photography app for security officers who need **fast successive photos**, an accurate UK date/time stamp, location details, smaller files, and quick sharing to workplace WhatsApp groups.
 
-> **Project status:** Requirements/planning. No functioning Android app has been built or tested yet.
+> **Project status:** Android Studio Kotlin/CameraX **v0.1 starter source code committed**. The code is an initial proof of concept, **not a verified APK or production-tested app**. Build results, device speed and WhatsApp behaviour still need real testing.
+
+1. In Android Studio, click **Get from VCS** (or **File → New → Project from Version Control**).
+2. Paste `https://github.com/rbabbit/securityapp.git`, choose a local folder, and click **Clone**.
+3. Open the cloned project; install the requested Android SDK 36 when prompted.
+4. If sync complains that `gradle-wrapper.jar` is missing, open Android Studio's **Terminal** at the project root and run `.\\gradlew.bat help`. The script securely fetches and verifies the pinned Gradle wrapper binary, then Gradle 8.13. Click **Sync Project with Gradle Files**.
+5. Connect an Android phone with USB debugging enabled, choose it in the device menu and press the green **Run ▶** button.
+6. Grant Camera permission and (optionally) Location permission, start a shift, and try repeated pictures and a small WhatsApp batch.
+
+This repo **is already an Android Studio project**. Do **not** make a second Empty Activity project inside it.
+
+## Features in v0.1 source
+
+- Native CameraX preview stays open, low-latency repeated shutter with on-screen or phone volume button.
+- On-device company/site shift start and end; shift history and chronological photo gallery.
+- Optional current GPS fix (with actual accuracy where available) and precise UK capture time; editable site label, including per-photo restamping from a small un-stamped base.
+- Each large original is stored privately inside the app; small compressed JPEG and re-stampable base are also stored privately.
+- Bulk handoff of selected or unconfirmed photos to WhatsApp, WhatsApp Business or Android Sharesheet. **You must choose the actual WhatsApp group and press Send in WhatsApp.** No automatic retrieval of a personal WhatsApp groups list.
+- Explicit manual confirmation after share handoff; no fabricated delivery status.
+- Per-shift **Delete LARGE originals** action only when validated compressed base and share copies exist; warns that originals are irrecoverable.
+
+## Current limitations and next work
+
+- **Build and on-device tests are pending.** This initial code hasn't yet been compiled on a configured Android SDK in this session.
+- Large batches (20–50) and fast consecutive photos need performance/device testing.
+- The app uses a simple private JSON index; a hardened production version should use Room plus persistent Android WorkManager processing and recovery for interrupted compression.
+- The app has **no exported backup** yet: uninstalling the app or resetting the device can lose all local photos and shift records. Don't use as your only evidence archive.
+- No automatic group extraction: WhatsApp's existing contacts/groups are only selectable in WhatsApp's own UI. Shortcut appearance varies.
+- PIN/biometric lock, a full company/site profile picker, explicit torch control, full-original evidence export, and per-shift export are follow-up enhancements.
+- Never store real site photos, private GPS data or passwords in this public GitHub repository.
+
+## Build/checking
+
+A GitHub Actions workflow attempts `:app:assembleDebug` and uploads the debug APK as an artifact when builds succeed. It is a useful build check, not a substitute for real phone testing.
 
 ## Core workflow
 
