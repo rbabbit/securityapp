@@ -18,7 +18,7 @@ This repo **is already an Android Studio project**. Do **not** make a second Emp
 - Camera and shift/gallery controls now apply Android system-bar insets, so bottom buttons stay above the navigation bar, including on Android 15+ phones.
 - The photo-sharing popup now actually shows **WhatsApp**, **WhatsApp Business** and **Other apps**; the previous dialog mistakenly combined message text and a list of options.
 - Short Android shutter-click sound plays immediately when the shutter is pressed, including the hardware volume-button shortcut. Its loudness depends on the phone's sound settings.
-- No changes to local shift records, photo storage, compression or application ID; updating over v0.1 should preserve those app files.
+- No changes to local shift records, photo storage, compression or application ID. **An update preserves app-private photos and records only if both APKs use the same signing key.** GitHub Actions debug builds can use different debug keys between runs, so Android may refuse to install the new APK over the old one. **Do not uninstall an old test build before saving any photographs you want to keep:** uninstalling removes this app's private data. Builds from the same local Android Studio debug keystore can normally update one another.
 
 ## Features in v0.1 source
 
