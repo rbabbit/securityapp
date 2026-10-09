@@ -1,4 +1,12 @@
-# Security Patrol Camera — v0.1.9
+# Security Patrol Camera — v0.1.10
+
+## v0.1.10 — cleaner sharing popup
+
+- Removes the unnecessary “select group there” text from the image-sharing popup. It now offers only **WhatsApp**, **WhatsApp Business**, and **Other apps** under a short **Send N photos** title.
+- The actual WhatsApp recipient/group is selected within WhatsApp. **Security Patrol does not know or save which group was selected**, and does not automatically send to a remembered group.
+- Preserves the existing multi-image intent, photo attachments, FileProvider permissions, and manual sent-confirmation flow. No changes to the photo database, layout outside this popup, or company/site/GPS stamps.
+
+
 
 ## New in v0.1.9 — approved camera mockup implemented
 

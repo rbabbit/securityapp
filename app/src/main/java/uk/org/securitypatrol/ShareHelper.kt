@@ -26,15 +26,15 @@ object ShareHelper {
             val image = File(activity.filesDir, requireNotNull(p.smallPath))
             uris.add(FileProvider.getUriForFile(activity, "uk.org.securitypatrol.fileprovider", image))
         }
-        // setMessage() and setItems() are mutually exclusive in Android's
-        // AlertDialog layout: using both hid all three sharing choices.
+        // Keep this chooser short. WhatsApp selects the actual recipient.
+        // That recipient is not returned to, or stored by, our app.
         val options = arrayOf(
-            "WhatsApp — select group there",
-            "WhatsApp Business — select group there",
+            "WhatsApp",
+            "WhatsApp Business",
             "Other apps"
         )
         AlertDialog.Builder(activity)
-            .setTitle("Share " + ready.size + " patrol photos")
+            .setTitle("Send " + ready.size + " photos")
             .setItems(options) { _, which ->
                 val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
                     type = "image/jpeg"
