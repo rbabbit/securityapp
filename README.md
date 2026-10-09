@@ -2,7 +2,7 @@
 
 An Android-first, offline-capable patrol photography app for security officers who need **fast successive photos**, an accurate UK date/time stamp, location details, smaller files, and quick sharing to workplace WhatsApp groups.
 
-> **Project status:** Android Studio Kotlin/CameraX **v0.1.1 test version source code committed**. The code is an initial proof of concept, **not a verified APK or production-tested app**. Build results, device speed and WhatsApp behaviour still need real testing.
+> **Project status:** Android Studio Kotlin/CameraX **v0.1.2 test version source code committed**. The code is an initial proof of concept, **not a verified APK or production-tested app**. Build results, device speed and WhatsApp behaviour still need real testing.
 
 1. In Android Studio, click **Get from VCS** (or **File → New → Project from Version Control**).
 2. Paste `https://github.com/rbabbit/securityapp.git`, choose a local folder, and click **Clone**.
@@ -12,6 +12,18 @@ An Android-first, offline-capable patrol photography app for security officers w
 6. Grant Camera permission and (optionally) Location permission, start a shift, and try repeated pictures and a small WhatsApp batch.
 
 This repo **is already an Android Studio project**. Do **not** make a second Empty Activity project inside it.
+
+## v0.1.2 — hourly patrols + one-tap selection
+
+- **Shift → Patrol → Photos:** one employer/site shift contains separate numbered patrol rounds, each with its own timestamps, photos and WhatsApp sharing selection. A shift can contain as many rounds as needed.
+- **Next Patrol** on the camera: starts the next group deliberately; it does not interrupt the live camera preview.
+- **Optional automatic hourly rounds:** when creating a shift, enable "Automatically group hourly patrols" (on by default). The next photo begins a new round only after at least **50 minutes since the first photo of the current round** and **15 minutes without a photo**. A patrol lasting across a clock-hour boundary is not cut in half. Tap Next Patrol to split earlier.
+- The photo gallery has a **patrol dropdown**, normally opening the latest round. You can explicitly choose **All patrols (whole shift)** when needed.
+- **Automatic selection of unsent photos**, plus **Select all**, **Unsent only**, and **Clear** buttons; never auto-send photos. Selections are scoped to the displayed round (or to the current shift only when viewing All patrols), never across employers.
+- **Send selected** sends your ticked photos; **Send unsent** sends all ready, unconfirmed photos in the chosen round without any ticking. The camera's **Send this patrol** shortcut works the same way.
+- If selected photos were already marked sent, a confirmation asks whether to share them again. WhatsApp's own group selection and final Send remain unchanged.
+- **Backward compatibility:** older v0.1.1 shift/photo records are assigned to a legacy first patrol in memory, preserving their original capture times, private files, place names and manually confirmed send flags. Data is saved in format v2 when next updated.
+- **Important test-device warning:** install upgrades only with the same app signing key. Don't uninstall v0.1.1 to install v0.1.2 unless you are willing to lose locally stored test photos, because export/backup is not built yet.
 
 ## Small test fixes in v0.1.1
 
@@ -32,7 +44,7 @@ This repo **is already an Android Studio project**. Do **not** make a second Emp
 
 ## Current limitations and next work
 
-- **Build and on-device tests are pending.** This initial code hasn't yet been compiled on a configured Android SDK in this session.
+- **v0.1.2 changes require a new build and real-device tests.** GitHub Actions compilation is a helpful check, but real-phone testing is still essential.
 - Large batches (20–50) and fast consecutive photos need performance/device testing.
 - The app uses a simple private JSON index; a hardened production version should use Room plus persistent Android WorkManager processing and recovery for interrupted compression.
 - The app has **no exported backup** yet: uninstalling the app or resetting the device can lose all local photos and shift records. Don't use as your only evidence archive.
