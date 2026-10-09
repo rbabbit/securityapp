@@ -49,14 +49,22 @@ object ShiftReport {
                 appendLine("  Flagged photo: " + stamp(it.timeMs) + " — " + it.place)
             }
             if (shift.checkpoints.isNotEmpty()) {
-                val completed = shift.checkpoints.count {
+                val applicable = shift.checkpoints.filter { checkpoint ->
+                    round.endedMs == null || checkpoint.addedAtMs <= round.endedMs!!
+                }
+                val completed = applicable.count {
                     round.checkedCheckpoints.containsKey(it.id)
                 }
-                appendLine("Checkpoints marked visited: " + completed + "/" + shift.checkpoints.size)
+                appendLine("Checkpoints marked visited: " + completed + "/" + applicable.size)
                 shift.checkpoints.forEach { checkpoint ->
                     val checkedAt = round.checkedCheckpoints[checkpoint.id]
-                    appendLine("  " + checkpoint.name + ": " +
-                        (checkedAt?.let(::stamp) ?: "NOT CHECKED"))
+                    val status = when {
+                        checkedAt != null -> stamp(checkedAt)
+                        round.endedMs != null && checkpoint.addedAtMs > round.endedMs!! ->
+                            "NOT CONFIGURED YET"
+                        else -> "NOT CHECKED"
+                    }
+                    appendLine("  " + checkpoint.name + ": " + status)
                 }
             }
             if (pictures.isNotEmpty()) {
