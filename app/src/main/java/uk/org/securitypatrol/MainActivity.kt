@@ -1,0 +1,369 @@
+package uk.org.securitypatrol
+
+import android.Manifest
+import android.annotation.SuppressLint
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
+import android.os.Bundle
+import android.os.Looper
+import android.os.SystemClock
+import android.view.Gravity
+import android.view.KeyEvent
+import android.view.ViewGroup
+import android.widget.Button
+import android.widget.EditText
+import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.TextView
+import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.app.AppCompatActivity
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageCapture
+import androidx.camera.core.ImageCaptureException
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
+import androidx.core.content.ContextCompat
+import java.io.File
+import java.util.UUID
+import java.util.concurrent.Executors
+import kotlin.math.max
+
+/**
+ * One-screen, low-friction patrol capture. The preview never closes between photos.
+ * Compression and stamping run outside the camera callback thread.
+ */
+class MainActivity : AppCompatActivity() {
+    private lateinit var store: PatrolStore
+    private lateinit var previewView: PreviewView
+    private lateinit var status: TextView
+    private lateinit var gpsText: TextView
+    private lateinit var shiftButton: Button
+    private var imageCapture: ImageCapture? = null
+    private val cameraExecutor = Executors.newSingleThreadExecutor()
+    private val imageProcessor = Executors.newSingleThreadExecutor()
+    private lateinit var locationManager: LocationManager
+    private var latestFix: Location? = null
+    private var cameraStarted = false
+
+    private val locationListener = LocationListener { location ->
+        // Keep only the newest location update, across GPS and network providers.
+        val previous = latestFix
+        if (previous == null || location.elapsedRealtimeNanos >= previous.elapsedRealtimeNanos) {
+            latestFix = location
+            displayState()
+        }
+    }
+
+    private val permissions = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        if (hasCameraPermission()) startCamera() else message("Camera permission is needed for photography")
+        startLocation()
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        store = PatrolStore(this)
+        locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        buildCameraScreen()
+        displayState()
+        if (hasCameraPermission()) {
+            startCamera()
+            startLocation()
+        } else {
+            permissions.launch(arrayOf(
+                Manifest.permission.CAMERA,
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            ))
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::store.isInitialized) {
+            // Gallery may have changed the same private shift index.
+            store = PatrolStore(this)
+            displayState()
+        }
+        if (::locationManager.isInitialized) startLocation()
+    }
+
+    override fun onPause() {
+        if (::locationManager.isInitialized) {
+            try { locationManager.removeUpdates(locationListener) } catch (_: Exception) { }
+        }
+        super.onPause()
+    }
+
+    override fun onDestroy() {
+        cameraExecutor.shutdown()
+        imageProcessor.shutdown()
+        super.onDestroy()
+    }
+
+    private fun hasCameraPermission() =
+        ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+
+    private fun hasLocationPermission() =
+        ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+        ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+
+    @SuppressLint("MissingPermission")
+    private fun startLocation() {
+        if (!hasLocationPermission()) return
+        listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER).forEach { provider ->
+            try {
+                if (locationManager.isProviderEnabled(provider)) {
+                    locationManager.requestLocationUpdates(provider, 1500L, 1f, locationListener, Looper.getMainLooper())
+                }
+            } catch (_: Exception) {
+                // Camera capture works even when location is unavailable or approximate.
+            }
+        }
+    }
+
+    private fun startCamera() {
+        if (cameraStarted || !hasCameraPermission()) return
+        cameraStarted = true
+        val future = ProcessCameraProvider.getInstance(this)
+        future.addListener({
+            try {
+                val provider = future.get()
+                val preview = Preview.Builder().build().also {
+                    it.surfaceProvider = previewView.surfaceProvider
+                }
+                val capture = ImageCapture.Builder()
+                    .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                    .setFlashMode(ImageCapture.FLASH_MODE_AUTO)
+                    .build()
+                provider.unbindAll()
+                provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, capture)
+                imageCapture = capture
+                displayState()
+            } catch (e: Exception) {
+                cameraStarted = false
+                message("Camera could not start: " + e.message)
+            }
+        }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun buildCameraScreen() {
+        val root = FrameLayout(this)
+        previewView = PreviewView(this).apply {
+            implementationMode = PreviewView.ImplementationMode.PERFORMANCE
+            scaleType = PreviewView.ScaleType.FILL_CENTER
+        }
+        root.addView(previewView, FrameLayout.LayoutParams(-1, -1))
+
+        val top = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(32), dp(14), dp(14))
+            setBackgroundColor(Color.argb(205, 11, 25, 41))
+        }
+        status = TextView(this).apply {
+            textSize = 17f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.WHITE)
+            maxLines = 2
+        }
+        gpsText = TextView(this).apply {
+            textSize = 12f
+            setTextColor(Color.LTGRAY)
+        }
+        top.addView(status)
+        top.addView(gpsText)
+        val shiftRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        shiftButton = button("Start shift") { chooseShiftAction() }
+        shiftRow.addView(shiftButton, LinearLayout.LayoutParams(0, dp(45), 1f))
+        shiftRow.addView(button("Edit place") { editShiftPlace() }, LinearLayout.LayoutParams(0, dp(45), 1f))
+        top.addView(shiftRow)
+        root.addView(top, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
+
+        val bottom = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(15), dp(12), dp(20))
+            setBackgroundColor(Color.argb(222, 11, 25, 41))
+        }
+        val captureButton = button("●  TAKE PHOTO") { takePhoto() }.apply {
+            textSize = 22f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.WHITE)
+            background = GradientDrawable().apply {
+                setColor(Color.rgb(19, 117, 85))
+                cornerRadius = dp(18).toFloat()
+            }
+        }
+        bottom.addView(captureButton, LinearLayout.LayoutParams(-1, dp(80)))
+        val shortcuts = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        shortcuts.addView(button("Patrol photos") { openGallery() }, LinearLayout.LayoutParams(0, dp(55), 1f))
+        shortcuts.addView(button("Send unsent") { shareCurrent() }, LinearLayout.LayoutParams(0, dp(55), 1f))
+        bottom.addView(shortcuts)
+        root.addView(bottom, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
+        setContentView(root)
+    }
+
+    private fun button(title: String, onClick: () -> Unit): Button = Button(this).apply {
+        text = title
+        isAllCaps = false
+        textSize = 13f
+        setOnClickListener { onClick() }
+    }
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density + 0.5f).toInt()
+
+    private fun displayState() {
+        if (!::status.isInitialized) return
+        val shift = store.activeShift()
+        status.text = if (shift == null) "No shift started" else
+            shift.company + "  •  " + shift.place + "\n" + shift.photos.size + " photographs"
+        shiftButton.text = if (shift == null) "Start shift" else "End shift"
+        val fix = validFix()
+        gpsText.text = if (fix == null) "GPS: waiting for a current location (photos still work)" else
+            "GPS: " + String.format(java.util.Locale.UK, "%.6f, %.6f  ±%.0f m",
+                fix.latitude, fix.longitude, if (fix.hasAccuracy()) fix.accuracy else 0f)
+    }
+
+    private fun validFix(): Location? {
+        val loc = latestFix ?: return null
+        val ageNs = SystemClock.elapsedRealtimeNanos() - loc.elapsedRealtimeNanos
+        return if (ageNs in 0L..120_000_000_000L) loc else null
+    }
+
+    private fun chooseShiftAction() {
+        val shift = store.activeShift()
+        if (shift != null) {
+            AlertDialog.Builder(this).setTitle("End shift?")
+                .setMessage("Photos remain saved in the app, even after ending this shift.")
+                .setPositiveButton("End shift") { _, _ -> store.endShift(); displayState() }
+                .setNegativeButton("Cancel", null).show()
+            return
+        }
+        val previous = store.shifts.firstOrNull()
+        val editor = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(22), dp(10), dp(22), dp(4))
+        }
+        val companyField = EditText(this).apply {
+            hint = "Company (e.g. BOX Security)"
+            setSingleLine(true)
+            setText(previous?.company.orEmpty())
+        }
+        val placeField = EditText(this).apply {
+            hint = "Site / address (editable)"
+            setSingleLine(false)
+            setText(previous?.place.orEmpty())
+        }
+        editor.addView(companyField)
+        editor.addView(placeField)
+        AlertDialog.Builder(this).setTitle("Start a security shift")
+            .setView(editor)
+            .setPositiveButton("Start") { _, _ ->
+                val company = companyField.text.toString().trim()
+                val place = placeField.text.toString().trim()
+                if (company.isEmpty() || place.isEmpty()) {
+                    message("Company and site name are required")
+                } else {
+                    try { store.startShift(company, place); displayState() }
+                    catch (e: Exception) { message(e.message ?: "Cannot start shift") }
+                }
+            }
+            .setNegativeButton("Cancel", null).show()
+    }
+
+    private fun editShiftPlace() {
+        val shift = store.activeShift() ?: run { message("Start a shift first"); return }
+        val field = EditText(this).apply {
+            setText(shift.place)
+            selectAll()
+            setPadding(dp(18), dp(15), dp(18), dp(15))
+        }
+        AlertDialog.Builder(this).setTitle("Site / place name")
+            .setMessage("This is your editable label, separate from measured GPS coordinates. Applies to new photos.")
+            .setView(field)
+            .setPositiveButton("Save") { _, _ ->
+                val name = field.text.toString().trim()
+                if (name.isNotEmpty()) { store.setActivePlace(name); displayState() }
+            }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun takePhoto() {
+        val shift = store.activeShift() ?: run { message("Start a shift before taking photos"); return }
+        val capture = imageCapture ?: run { message("Camera is not ready"); return }
+        val fix = validFix()
+        val ageSeconds = fix?.let { max(0L, (SystemClock.elapsedRealtimeNanos() - it.elapsedRealtimeNanos) / 1_000_000_000L) }
+        val photoId = UUID.randomUUID().toString()
+        val relative = "patrols/" + shift.id + "/original/" + photoId + ".jpg"
+        val output = File(filesDir, relative).apply { parentFile?.mkdirs() }
+        val photo = PatrolPhoto(
+            id = photoId, shiftId = shift.id, timeMs = System.currentTimeMillis(),
+            place = shift.place, lat = fix?.latitude, lon = fix?.longitude,
+            accuracyMetres = fix?.takeIf { it.hasAccuracy() }?.accuracy,
+            gpsAgeSeconds = ageSeconds, originalPath = relative
+        )
+        try {
+            capture.takePicture(
+                ImageCapture.OutputFileOptions.Builder(output).build(),
+                cameraExecutor,
+                object : ImageCapture.OnImageSavedCallback {
+                    override fun onImageSaved(result: ImageCapture.OutputFileResults) {
+                        try {
+                            store.addPhoto(photo)
+                        } catch (e: Exception) {
+                            android.util.Log.e("PatrolCamera", "Failed to index original", e)
+                        }
+                        imageProcessor.execute {
+                            try {
+                                val (base, small) = PhotoProcessor.process(this@MainActivity, photo)
+                                store.processed(photo.id, base, small)
+                                runOnUiThread { displayState() }
+                            } catch (e: Exception) {
+                                android.util.Log.e("PatrolCamera", "Photo processing failed; original retained", e)
+                                runOnUiThread { message("A photo could not be compressed. The original is kept.") }
+                            }
+                        }
+                        runOnUiThread { displayState() }
+                    }
+
+                    override fun onError(exception: ImageCaptureException) {
+                        output.delete()
+                        runOnUiThread { message("Photo failed: " + exception.message) }
+                    }
+                }
+            )
+        } catch (e: Exception) {
+            message("Unable to capture: " + e.message)
+        }
+    }
+
+    private fun openGallery() {
+        startActivity(Intent(this, GalleryActivity::class.java))
+    }
+
+    private fun shareCurrent() {
+        val shift = store.activeShift() ?: run { message("Start a shift first"); return }
+        val unsent = shift.photos.filter { !it.confirmedSent && it.smallPath != null }
+        if (unsent.isEmpty()) { message("No unconfirmed photos are ready to share"); return }
+        ShareHelper.share(this, store, unsent)
+    }
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
+            if (event?.repeatCount == 0) takePhoto()
+            return true
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
+    private fun message(value: String) = Toast.makeText(this, value, Toast.LENGTH_LONG).show()
+}
