@@ -19,6 +19,7 @@ import android.view.Gravity
 import android.view.KeyEvent
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -52,6 +53,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var status: TextView
     private lateinit var gpsText: TextView
     private lateinit var shiftButton: Button
+    private lateinit var nextPatrolButton: Button
     private var imageCapture: ImageCapture? = null
     private val cameraExecutor = Executors.newSingleThreadExecutor()
     private val imageProcessor = Executors.newSingleThreadExecutor()
@@ -203,6 +205,10 @@ class MainActivity : AppCompatActivity() {
         shiftRow.addView(shiftButton, LinearLayout.LayoutParams(0, dp(45), 1f))
         shiftRow.addView(button("Edit place") { editShiftPlace() }, LinearLayout.LayoutParams(0, dp(45), 1f))
         top.addView(shiftRow)
+        nextPatrolButton = button("Start next patrol") { nextPatrol() }.apply {
+            textSize = 12f
+        }
+        top.addView(nextPatrolButton, LinearLayout.LayoutParams(-1, dp(43)))
         root.addView(top, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
 
         val bottom = LinearLayout(this).apply {
@@ -222,7 +228,7 @@ class MainActivity : AppCompatActivity() {
         bottom.addView(captureButton, LinearLayout.LayoutParams(-1, dp(80)))
         val shortcuts = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         shortcuts.addView(button("Patrol photos") { openGallery() }, LinearLayout.LayoutParams(0, dp(55), 1f))
-        shortcuts.addView(button("Send unsent") { shareCurrent() }, LinearLayout.LayoutParams(0, dp(55), 1f))
+        shortcuts.addView(button("Send this patrol") { shareCurrent() }, LinearLayout.LayoutParams(0, dp(55), 1f))
         bottom.addView(shortcuts)
         root.addView(bottom, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
         setContentView(root)
@@ -240,9 +246,17 @@ class MainActivity : AppCompatActivity() {
     private fun displayState() {
         if (!::status.isInitialized) return
         val shift = store.activeShift()
-        status.text = if (shift == null) "No shift started" else
-            shift.company + "  •  " + shift.place + "\n" + shift.photos.size + " photographs"
+        if (shift == null) {
+            status.text = "No shift started"
+        } else {
+            val roundNumber = shift.rounds.indexOfFirst { it.id == shift.activeRoundId } + 1
+            val currentPhotos = shift.photos.count { it.roundId == shift.activeRoundId }
+            status.text = shift.company + "  •  " + shift.place + "\n" +
+                "Patrol " + roundNumber.coerceAtLeast(1) + " — " +
+                currentPhotos + " photos (" + shift.photos.size + " shift total)"
+        }
         shiftButton.text = if (shift == null) "Start shift" else "End shift"
+        nextPatrolButton.isEnabled = shift != null
         val fix = validFix()
         gpsText.text = if (fix == null) "GPS: waiting for a current location (photos still work)" else
             "GPS: " + String.format(java.util.Locale.UK, "%.6f, %.6f  ±%.0f m",
@@ -281,6 +295,12 @@ class MainActivity : AppCompatActivity() {
         }
         editor.addView(companyField)
         editor.addView(placeField)
+        val autoHourly = CheckBox(this).apply {
+            text = "Automatically group hourly patrols"
+            isChecked = true
+            setTextColor(Color.WHITE)
+        }
+        editor.addView(autoHourly)
         AlertDialog.Builder(this).setTitle("Start a security shift")
             .setView(editor)
             .setPositiveButton("Start") { _, _ ->
@@ -289,11 +309,32 @@ class MainActivity : AppCompatActivity() {
                 if (company.isEmpty() || place.isEmpty()) {
                     message("Company and site name are required")
                 } else {
-                    try { store.startShift(company, place); displayState() }
+                    try { store.startShift(company, place, autoHourly.isChecked); displayState() }
                     catch (e: Exception) { message(e.message ?: "Cannot start shift") }
                 }
             }
             .setNegativeButton("Cancel", null).show()
+    }
+
+    private fun nextPatrol() {
+        val shift = store.activeShift() ?: run { message("Start a shift first"); return }
+        val round = store.currentRound()
+        val count = shift.photos.count { it.roundId == round?.id }
+        if (count == 0) {
+            message("This patrol is still empty. Take photos before starting the next.")
+            return
+        }
+        val nextNumber = shift.rounds.size + 1
+        AlertDialog.Builder(this)
+            .setTitle("Start Patrol " + nextNumber + "?")
+            .setMessage("New photographs will be saved in Patrol " + nextNumber +
+                ". Earlier patrol photographs stay in their own group.")
+            .setPositiveButton("Start next patrol") { _, _ ->
+                store.startNextRound()
+                displayState()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun editShiftPlace() {
@@ -315,16 +356,22 @@ class MainActivity : AppCompatActivity() {
     private fun takePhoto() {
         val shift = store.activeShift() ?: run { message("Start a shift before taking photos"); return }
         val capture = imageCapture ?: run { message("Camera is not ready"); return }
+        val captureMs = System.currentTimeMillis()
+        // Assign the patrol round at shutter time, not later during processing.
+        // Automatically opens a fresh round on the next picture after an hourly
+        // cycle and a break; manual Next Patrol works even earlier.
+        val round = store.roundForCapture(captureMs)
         val fix = validFix()
         val ageSeconds = fix?.let { max(0L, (SystemClock.elapsedRealtimeNanos() - it.elapsedRealtimeNanos) / 1_000_000_000L) }
         val photoId = UUID.randomUUID().toString()
         val relative = "patrols/" + shift.id + "/original/" + photoId + ".jpg"
         val output = File(filesDir, relative).apply { parentFile?.mkdirs() }
         val photo = PatrolPhoto(
-            id = photoId, shiftId = shift.id, timeMs = System.currentTimeMillis(),
+            id = photoId, shiftId = shift.id, timeMs = captureMs,
             place = shift.place, lat = fix?.latitude, lon = fix?.longitude,
             accuracyMetres = fix?.takeIf { it.hasAccuracy() }?.accuracy,
-            gpsAgeSeconds = ageSeconds, originalPath = relative
+            gpsAgeSeconds = ageSeconds, originalPath = relative,
+            roundId = round.id
         )
         try {
             capture.takePicture(
@@ -370,8 +417,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun shareCurrent() {
         val shift = store.activeShift() ?: run { message("Start a shift first"); return }
-        val unsent = shift.photos.filter { !it.confirmedSent && it.smallPath != null }
-        if (unsent.isEmpty()) { message("No unconfirmed photos are ready to share"); return }
+        val roundId = shift.activeRoundId
+        val unsent = shift.photos.filter {
+            it.roundId == roundId && !it.confirmedSent && it.smallPath != null
+        }
+        if (unsent.isEmpty()) { message("No unconfirmed photos in the current patrol are ready"); return }
         ShareHelper.share(this, store, unsent)
     }
 
