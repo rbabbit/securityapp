@@ -2,7 +2,7 @@
 
 An Android-first, offline-capable patrol photography app for security officers who need **fast successive photos**, an accurate UK date/time stamp, location details, smaller files, and quick sharing to workplace WhatsApp groups.
 
-> **Project status:** Android Studio Kotlin/CameraX **v0.1.2 test version source code committed**. The code is an initial proof of concept, **not a verified APK or production-tested app**. Build results, device speed and WhatsApp behaviour still need real testing.
+> **Project status:** Android Studio Kotlin/CameraX **v0.1.3 test version source code committed**. The code is an initial proof of concept, **not a verified APK or production-tested app**. Build results, device speed and WhatsApp behaviour still need real testing.
 
 1. In Android Studio, click **Get from VCS** (or **File → New → Project from Version Control**).
 2. Paste `https://github.com/rbabbit/securityapp.git`, choose a local folder, and click **Clone**.
@@ -12,6 +12,15 @@ An Android-first, offline-capable patrol photography app for security officers w
 6. Grant Camera permission and (optionally) Location permission, start a shift, and try repeated pictures and a small WhatsApp batch.
 
 This repo **is already an Android Studio project**. Do **not** make a second Empty Activity project inside it.
+
+## v0.1.3 — camera flash Off / On / Auto
+
+- The camera now displays a **Flash** button beside **Next patrol**, without adding another screen or making photo capture wait.
+- Tap to choose **Off** (never fire), **On** (request flash for each picture), or **Auto** (CameraX decides according to light). The choice is applied to subsequent shots and saved on the phone across shifts/restarts.
+- **Off is the default for new installs** so rapid photographs do not trigger unexpected flashes. Earlier builds had Auto fixed on.
+- On phones without a supported rear-camera flash, the flash button is disabled and says **Flash: unavailable**.
+- Fast consecutive captures may still be limited by the phone's flash hardware or require charging between flashes. If speed matters most, leave flash **Off**.
+- The shutter click sound, GPS/timestamps, compression, shift history and WhatsApp sharing are otherwise unchanged. Use the **same signing key** when updating if preserving private patrol photos.
 
 ## v0.1.2 — hourly patrols + one-tap selection
 

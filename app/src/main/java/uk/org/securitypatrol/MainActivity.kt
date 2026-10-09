@@ -54,7 +54,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var gpsText: TextView
     private lateinit var shiftButton: Button
     private lateinit var nextPatrolButton: Button
+    private lateinit var flashButton: Button
     private var imageCapture: ImageCapture? = null
+    private var hasFlashUnit = false
+    private var flashMode = ImageCapture.FLASH_MODE_OFF
     private val cameraExecutor = Executors.newSingleThreadExecutor()
     private val imageProcessor = Executors.newSingleThreadExecutor()
     private lateinit var locationManager: LocationManager
@@ -83,6 +86,16 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         shutterSound.load(MediaActionSound.SHUTTER_CLICK)
+        // Remember the flash setting across app restarts and shifts. Start
+        // from OFF on a new installation: predictable rapid photography.
+        val savedFlash = getSharedPreferences("camera_settings", Context.MODE_PRIVATE)
+            .getInt("flash_mode", ImageCapture.FLASH_MODE_OFF)
+        flashMode = when (savedFlash) {
+            ImageCapture.FLASH_MODE_OFF,
+            ImageCapture.FLASH_MODE_ON,
+            ImageCapture.FLASH_MODE_AUTO -> savedFlash
+            else -> ImageCapture.FLASH_MODE_OFF
+        }
         store = PatrolStore(this)
         locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
         buildCameraScreen()
@@ -156,14 +169,20 @@ class MainActivity : AppCompatActivity() {
                 }
                 val capture = ImageCapture.Builder()
                     .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-                    .setFlashMode(ImageCapture.FLASH_MODE_AUTO)
+                    .setFlashMode(flashMode)
                     .build()
                 provider.unbindAll()
-                provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, capture)
+                val camera = provider.bindToLifecycle(
+                    this, CameraSelector.DEFAULT_BACK_CAMERA, preview, capture
+                )
                 imageCapture = capture
+                hasFlashUnit = camera.cameraInfo.hasFlashUnit()
+                updateFlashButton()
                 displayState()
             } catch (e: Exception) {
                 cameraStarted = false
+                hasFlashUnit = false
+                updateFlashButton()
                 message("Camera could not start: " + e.message)
             }
         }, ContextCompat.getMainExecutor(this))
@@ -205,10 +224,23 @@ class MainActivity : AppCompatActivity() {
         shiftRow.addView(shiftButton, LinearLayout.LayoutParams(0, dp(45), 1f))
         shiftRow.addView(button("Edit place") { editShiftPlace() }, LinearLayout.LayoutParams(0, dp(45), 1f))
         top.addView(shiftRow)
-        nextPatrolButton = button("Start next patrol") { nextPatrol() }.apply {
+        val cameraOptions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+        }
+        nextPatrolButton = button("Next patrol") { nextPatrol() }.apply {
             textSize = 12f
         }
-        top.addView(nextPatrolButton, LinearLayout.LayoutParams(-1, dp(43)))
+        flashButton = button("Flash: Off") { chooseFlashMode() }.apply {
+            textSize = 12f
+            isEnabled = false // enabled once CameraX confirms a flash unit
+        }
+        cameraOptions.addView(
+            nextPatrolButton, LinearLayout.LayoutParams(0, dp(47), 1f)
+        )
+        cameraOptions.addView(
+            flashButton, LinearLayout.LayoutParams(0, dp(47), 1f)
+        )
+        top.addView(cameraOptions)
         root.addView(top, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
 
         val bottom = LinearLayout(this).apply {
@@ -232,6 +264,52 @@ class MainActivity : AppCompatActivity() {
         bottom.addView(shortcuts)
         root.addView(bottom, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
         setContentView(root)
+    }
+
+    /** CameraX flash mode applies to subsequent photographs without rebinding. */
+    private fun chooseFlashMode() {
+        if (!hasFlashUnit || imageCapture == null) {
+            message("Flash is not available on this camera")
+            return
+        }
+        val options = arrayOf(
+            "Off — no flash (best for fast photos)",
+            "On — request flash with each photo",
+            "Auto — flash when the phone decides"
+        )
+        val modes = intArrayOf(
+            ImageCapture.FLASH_MODE_OFF,
+            ImageCapture.FLASH_MODE_ON,
+            ImageCapture.FLASH_MODE_AUTO
+        )
+        val currentIndex = modes.indexOf(flashMode).coerceAtLeast(0)
+        AlertDialog.Builder(this)
+            .setTitle("Camera flash")
+            .setSingleChoiceItems(options, currentIndex) { dialog, which ->
+                val newMode = modes[which]
+                try {
+                    imageCapture?.setFlashMode(newMode)
+                    flashMode = newMode
+                    getSharedPreferences("camera_settings", Context.MODE_PRIVATE)
+                        .edit().putInt("flash_mode", newMode).apply()
+                    updateFlashButton()
+                    dialog.dismiss()
+                } catch (e: Exception) {
+                    message("Could not change flash: " + e.message)
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun updateFlashButton() {
+        if (!::flashButton.isInitialized) return
+        flashButton.isEnabled = hasFlashUnit && imageCapture != null
+        flashButton.text = if (!hasFlashUnit) "Flash: unavailable" else when (flashMode) {
+            ImageCapture.FLASH_MODE_ON -> "Flash: On"
+            ImageCapture.FLASH_MODE_AUTO -> "Flash: Auto"
+            else -> "Flash: Off"
+        }
     }
 
     private fun button(title: String, onClick: () -> Unit): Button = Button(this).apply {
