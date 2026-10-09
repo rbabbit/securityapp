@@ -13,9 +13,13 @@ import android.location.LocationListener
 import android.location.LocationManager
 import android.media.MediaActionSound
 import android.os.Bundle
+import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.view.Gravity
+import android.view.MotionEvent
+import android.view.View
+import android.view.WindowManager
 import android.view.KeyEvent
 import android.view.ViewGroup
 import android.widget.Button
@@ -25,6 +29,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -57,6 +62,19 @@ class MainActivity : AppCompatActivity() {
     private lateinit var nextPatrolButton: Button
     private lateinit var flashButton: Button
     private lateinit var torchButton: Button
+    private lateinit var cameraTopBar: LinearLayout
+    private lateinit var cameraShortcuts: LinearLayout
+    private lateinit var shutterButton: Button
+    private lateinit var lockedHint: TextView
+    private var photoOnlyLock = false
+    private var lockTouchInProgress = false
+    private val unlockHandler = Handler(Looper.getMainLooper())
+    private val unlockAction = Runnable {
+        if (photoOnlyLock && lockTouchInProgress) {
+            setPhotoOnlyLock(false)
+            message("Camera controls unlocked")
+        }
+    }
     private var imageCapture: ImageCapture? = null
     private var boundCamera: Camera? = null
     private var torchEnabled = false
@@ -103,8 +121,28 @@ class MainActivity : AppCompatActivity() {
         }
         store = PatrolStore(this)
         locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        WindowCompat.getInsetsController(window, window.decorView).apply {
+            isAppearanceLightStatusBars = true
+            isAppearanceLightNavigationBars = true
+        }
         buildCameraScreen()
         displayState()
+        if (savedInstanceState?.getBoolean("photo_only_lock") == true &&
+            store.activeShift() != null
+        ) {
+            setPhotoOnlyLock(true)
+        }
+        // In this mode, the Android back gesture must not leave the camera.
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (photoOnlyLock) {
+                    message("Camera locked — hold TAKE PHOTO for 2 seconds to unlock")
+                } else {
+                    isEnabled = false
+                    onBackPressedDispatcher.onBackPressed()
+                }
+            }
+        })
         if (hasCameraPermission()) {
             startCamera()
             startLocation()
@@ -115,6 +153,11 @@ class MainActivity : AppCompatActivity() {
                 Manifest.permission.ACCESS_COARSE_LOCATION
             ))
         }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean("photo_only_lock", photoOnlyLock)
+        super.onSaveInstanceState(outState)
     }
 
     override fun onResume() {
@@ -143,6 +186,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        unlockHandler.removeCallbacks(unlockAction)
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         cameraExecutor.shutdown()
         imageProcessor.shutdown()
         shutterSound.release()
@@ -220,20 +265,21 @@ class MainActivity : AppCompatActivity() {
         }
         root.addView(previewView, FrameLayout.LayoutParams(-1, -1))
 
-        val top = LinearLayout(this).apply {
+        cameraTopBar = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(14), dp(12), dp(14), dp(14))
-            setBackgroundColor(Color.argb(205, 11, 25, 41))
+            setPadding(dp(14), dp(10), dp(14), dp(10))
+            setBackgroundColor(Color.WHITE)
         }
+        val top = cameraTopBar
         status = TextView(this).apply {
             textSize = 17f
             setTypeface(null, Typeface.BOLD)
-            setTextColor(Color.WHITE)
+            setTextColor(Color.BLACK)
             maxLines = 2
         }
         gpsText = TextView(this).apply {
             textSize = 12f
-            setTextColor(Color.LTGRAY)
+            setTextColor(Color.DKGRAY)
         }
         top.addView(status)
         top.addView(gpsText)
@@ -270,23 +316,88 @@ class MainActivity : AppCompatActivity() {
 
         val bottom = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(12), dp(15), dp(12), dp(20))
-            setBackgroundColor(Color.argb(222, 11, 25, 41))
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(12), dp(10), dp(12), dp(14))
+            setBackgroundColor(Color.WHITE)
         }
-        val captureButton = button("●  TAKE PHOTO") { takePhoto() }.apply {
-            textSize = 22f
+        lockedHint = TextView(this).apply {
+            text = "CAMERA LOCKED  •  Tap to photograph  •  Hold PHOTO for 2 seconds to unlock"
+            gravity = Gravity.CENTER
+            textSize = 12f
+            setTextColor(Color.BLACK)
+            visibility = View.GONE
+            setPadding(dp(6), dp(4), dp(6), dp(8))
+        }
+        bottom.addView(lockedHint, LinearLayout.LayoutParams(-1, -2))
+        // Small monochrome shutter; photo capture still happens without a
+        // full-screen review or photo-processing delay.
+        shutterButton = button("TAKE PHOTO") { takePhoto() }.apply {
+            textSize = 17f
             setTypeface(null, Typeface.BOLD)
-            setTextColor(Color.WHITE)
+            setTextColor(Color.BLACK)
             background = GradientDrawable().apply {
-                setColor(Color.rgb(19, 117, 85))
-                cornerRadius = dp(18).toFloat()
+                setColor(Color.WHITE)
+                setStroke(dp(2), Color.BLACK)
+                cornerRadius = dp(12).toFloat()
+            }
+            contentDescription = "Take photo; in lock mode hold for two seconds to unlock controls"
+        }
+        shutterButton.setOnTouchListener { _, event ->
+            if (!photoOnlyLock && !lockTouchInProgress) {
+                false
+            } else {
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        lockTouchInProgress = true
+                        unlockHandler.removeCallbacks(unlockAction)
+                        unlockHandler.postDelayed(unlockAction, 2_000L)
+                        true
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        // A long hold unlocks instead of creating an extra photo.
+                        val stillLocked = photoOnlyLock
+                        lockTouchInProgress = false
+                        unlockHandler.removeCallbacks(unlockAction)
+                        if (stillLocked) takePhoto()
+                        true
+                    }
+                    MotionEvent.ACTION_CANCEL -> {
+                        lockTouchInProgress = false
+                        unlockHandler.removeCallbacks(unlockAction)
+                        true
+                    }
+                    else -> true
+                }
             }
         }
-        bottom.addView(captureButton, LinearLayout.LayoutParams(-1, dp(80)))
-        val shortcuts = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        shortcuts.addView(button("Patrol photos") { openGallery() }, LinearLayout.LayoutParams(0, dp(55), 1f))
-        shortcuts.addView(button("Send this patrol") { shareCurrent() }, LinearLayout.LayoutParams(0, dp(55), 1f))
-        bottom.addView(shortcuts)
+        bottom.addView(shutterButton, LinearLayout.LayoutParams(dp(194), dp(58)).apply {
+            gravity = Gravity.CENTER_HORIZONTAL
+            topMargin = dp(4)
+            bottomMargin = dp(8)
+        })
+        cameraShortcuts = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        cameraShortcuts.addView(
+            button("Patrol photos") { openGallery() },
+            LinearLayout.LayoutParams(0, dp(49), 1f)
+        )
+        cameraShortcuts.addView(
+            button("Send patrol") { shareCurrent() },
+            LinearLayout.LayoutParams(0, dp(49), 1f)
+        )
+        cameraShortcuts.addView(
+            button("LOCK CAMERA") {
+                if (store.activeShift() == null) {
+                    message("Start a shift before locking the camera")
+                } else {
+                    setPhotoOnlyLock(true)
+                }
+            },
+            LinearLayout.LayoutParams(0, dp(49), 1f)
+        )
+        bottom.addView(cameraShortcuts, LinearLayout.LayoutParams(-1, -2))
         root.addView(bottom, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
         setContentView(root)
     }
@@ -406,10 +517,34 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * An in-app control lock; does NOT lock Android Home, notifications or
+     * the phone's hardware buttons. The preview and photo shutter remain live.
+     */
+    private fun setPhotoOnlyLock(enabled: Boolean) {
+        photoOnlyLock = enabled
+        cameraTopBar.visibility = if (enabled) View.GONE else View.VISIBLE
+        cameraShortcuts.visibility = if (enabled) View.GONE else View.VISIBLE
+        lockedHint.visibility = if (enabled) View.VISIBLE else View.GONE
+        if (enabled) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            message("Camera locked. Tap to shoot; hold TAKE PHOTO for 2 seconds to unlock.")
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+
     private fun button(title: String, onClick: () -> Unit): Button = Button(this).apply {
         text = title
         isAllCaps = false
-        textSize = 13f
+        textSize = 12f
+        setTextColor(Color.BLACK)
+        background = GradientDrawable().apply {
+            setColor(Color.WHITE)
+            setStroke(dp(1), Color.BLACK)
+            cornerRadius = dp(9).toFloat()
+        }
+        setPadding(dp(4), dp(4), dp(4), dp(4))
         setOnClickListener { onClick() }
     }
 
@@ -429,6 +564,7 @@ class MainActivity : AppCompatActivity() {
         }
         shiftButton.text = if (shift == null) "Start shift" else "End shift"
         nextPatrolButton.isEnabled = shift != null
+        if (photoOnlyLock && shift == null) setPhotoOnlyLock(false)
         val fix = validFix()
         gpsText.text = if (fix == null) "GPS: waiting for a current location (photos still work)" else
             "GPS: " + String.format(java.util.Locale.UK, "%.6f, %.6f  ±%.0f m",
