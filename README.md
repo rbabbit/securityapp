@@ -2,7 +2,7 @@
 
 An Android-first, offline-capable patrol photography app for security officers who need **fast successive photos**, an accurate UK date/time stamp, location details, smaller files, and quick sharing to workplace WhatsApp groups.
 
-> **Project status:** Android Studio Kotlin/CameraX **v0.1.6 test version source code committed**. The code is an initial proof of concept, **not a verified APK or production-tested app**. Build results, device speed and WhatsApp behaviour still need real testing.
+> **Project status:** Android Studio Kotlin/CameraX **v0.1.7 test version source code committed**. The code is an initial proof of concept, **not a verified APK or production-tested app**. Build results, device speed and WhatsApp behaviour still need real testing.
 
 1. In Android Studio, click **Get from VCS** (or **File → New → Project from Version Control**).
 2. Paste `https://github.com/rbabbit/securityapp.git`, choose a local folder, and click **Clone**.
@@ -12,6 +12,24 @@ An Android-first, offline-capable patrol photography app for security officers w
 6. Grant Camera permission and (optionally) Location permission, start a shift, and try repeated pictures and a small WhatsApp batch.
 
 This repo **is already an Android Studio project**. Do **not** make a second Empty Activity project inside it.
+
+## v0.1.7 — White/black interface and Photo-only Camera Lock
+
+- **LOCK CAMERA** on the camera screen hides all other app controls while keeping the live viewfinder and **TAKE PHOTO** visible. Start a shift first; there is no change to stored photos or active patrol records.
+- **Tap TAKE PHOTO** to take consecutive pictures while locked; **hold TAKE PHOTO for two seconds** to unlock camera controls. Releasing after the long hold does not take an extra photograph. The Android Back gesture does not leave the app while locked; volume-key shutter also continues working.
+- The touch lock is **within Security Patrol only**: it does *not* disable Android Home, notifications, the system lock screen or hardware power button. The screen is kept awake while camera mode is locked and returns to normal behaviour when unlocked.
+- The TAKE PHOTO button is **smaller, centred, white with black text** and has a black outline.
+- All main app panels, buttons, patrol/gallery/checkpoint screens and Android dialogs now use a clean **white-and-black** appearance. Dark photographic scenes and the existing black evidence timestamp overlay are unchanged.
+- v0.1.7 makes no changes to the shift/photos database format, company/site watermark, GPS, rapid capture processing, existing flash/torch modes, checkpoint notes, incident flags, ZIP export or WhatsApp sharing.
+- **Do not uninstall the existing app** just to install a debug build: uninstalling would delete app-private photographs and shift records. Updating requires the same APK signing key.
+
+### Quick v0.1.7 phone tests
+
+1. Start or resume a shift, choose LOCK CAMERA and check only TAKE PHOTO remains clickable.
+2. Tap rapidly to take ten photos and confirm they still appear with UK timestamp/GPS/site/company stamps.
+3. While locked, try Android Back, then **hold TAKE PHOTO for two seconds**. Controls should reappear with no unwanted photograph taken.
+4. Check the smaller white/black shutter, legibility of the gallery and its dialogs, and a test WhatsApp photo batch.
+5. Verify the app does not stay awake after you exit camera lock, and that existing shifts remain intact after an **update**, not uninstall.
 
 ## v0.1.6 — Incident flags, checkpoint checklist and secure-device export
 
