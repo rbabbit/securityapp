@@ -1,6 +1,8 @@
 package uk.org.securitypatrol
 
 import android.Manifest
+import android.content.Intent
+import android.provider.Settings
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
@@ -35,6 +37,7 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var siteField: EditText
     private lateinit var gpsCheck: CheckBox
     private lateinit var storageText: TextView
+    private lateinit var helperStatusText: TextView
     private var exportShiftId: String? = null
     private var includeOriginals = false
     private var exporting = false
@@ -155,6 +158,13 @@ class SettingsActivity : AppCompatActivity() {
         body.addView(button("Lock camera controls") { lockCameraOnReturn() })
         body.addView(note("Photo-only lock hides every control except TAKE PHOTO. Hold the photo button for 2 seconds to unlock."))
 
+        body.addView(section("WhatsApp group helper (TEST)"))
+        body.addView(note("Optional: check whether WhatsApp exposes the chosen chat title. No messages are read or stored. This does not send to a remembered group."))
+        helperStatusText = note("")
+        body.addView(helperStatusText)
+        body.addView(button("WhatsApp helper options") { showHelperOptions() })
+        body.addView(note("The helper only watches WhatsApp for 2 minutes after you use our WhatsApp photo-sharing option. Confirm any detected title yourself."))
+
         body.addView(section("Compressed photo size"))
         val qualityGroup = RadioGroup(this).apply { orientation = RadioGroup.VERTICAL }
         listOf(
@@ -184,6 +194,7 @@ class SettingsActivity : AppCompatActivity() {
         outer.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(outer)
         refreshStorage()
+        refreshHelperStatus()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -195,6 +206,110 @@ class SettingsActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         if (::storageText.isInitialized) refreshStorage()
+        if (::helperStatusText.isInitialized) refreshHelperStatus()
+    }
+
+    private fun refreshHelperStatus() {
+        val optedIn = WhatsAppTitleHelper.hasConsent(this)
+        val enabled = WhatsAppTitleHelper.isServiceEnabled(this)
+        val candidate = WhatsAppTitleHelper.candidate(this)
+        val remembered = WhatsAppTitleHelper.remembered(this)
+        helperStatusText.text = buildString {
+            append(if (optedIn && enabled) "Helper ready" else "Helper OFF")
+            if (optedIn && !enabled) append(" — enable the service in Android Accessibility")
+            if (candidate != null) append("\nPossible chat (NOT confirmed): ").append(candidate)
+            if (remembered != null) append("\nConfirmed name saved: ").append(remembered)
+            val status = WhatsAppTitleHelper.status(this@SettingsActivity)
+            if (status.isNotBlank()) append("\n").append(status)
+        }
+    }
+
+    private fun showHelperOptions() {
+        AlertDialog.Builder(this)
+            .setTitle("WhatsApp title helper — TEST")
+            .setItems(arrayOf(
+                "Enable helper / Android permission",
+                "Confirm detected chat name",
+                "Forget name and turn off helper",
+                "Open Android Accessibility settings"
+            )) { _, which ->
+                when (which) {
+                    0 -> explainAndEnableHelper()
+                    1 -> confirmHelperCandidate()
+                    2 -> disableHelper()
+                    3 -> startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                }
+            }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    private fun explainAndEnableHelper() {
+        AlertDialog.Builder(this)
+            .setTitle("Optional WhatsApp title access")
+            .setMessage(
+                "Android Accessibility is a powerful permission that can expose screen content. " +
+                    "This experimental service is restricted to WhatsApp and WhatsApp Business. " +
+                    "It checks only specific chat-title fields for up to 2 minutes after YOU choose " +
+                    "WhatsApp when sharing Security Patrol photographs.\n\n" +
+                    "It does not save chat messages, contact lists, photos, passwords or screen recordings. " +
+                    "It saves only a possible chat title locally until you confirm it, and uploads nothing. " +
+                    "It cannot send to a remembered group.\n\n" +
+                    "Enable it only on your own phone. You may disable the helper or its Android " +
+                    "Accessibility permission at any time."
+            )
+            .setPositiveButton("I agree — open Android settings") { _, _ ->
+                WhatsAppTitleHelper.grantLocalConsent(this)
+                refreshHelperStatus()
+                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            }
+            .setNegativeButton("No thanks", null)
+            .show()
+    }
+
+    private fun confirmHelperCandidate() {
+        val candidate = WhatsAppTitleHelper.candidate(this) ?: run {
+            toast("No chat title detected yet. Share test photos through WhatsApp first.")
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Is this your intended group?")
+            .setMessage(
+                "Possible chat name: " + candidate +
+                    "\n\nThis might be a contact rather than a group. " +
+                    "Confirm only if it matches your intended destination. " +
+                    "Remembering the name does NOT let the app automatically open or send to that group."
+            )
+            .setPositiveButton("Yes, remember name") { _, _ ->
+                WhatsAppTitleHelper.confirmCandidate(this)
+                refreshHelperStatus()
+                toast("Chat name remembered on this device")
+            }
+            .setNegativeButton("Not my group", null)
+            .show()
+    }
+
+    private fun disableHelper() {
+        AlertDialog.Builder(this)
+            .setTitle("Turn off the helper?")
+            .setMessage(
+                "Delete the detected and confirmed chat names, revoke our in-app consent, " +
+                    "and stop further observations. Android Accessibility permission remains enabled " +
+                    "until you switch the service off in Android Settings."
+            )
+            .setPositiveButton("Forget and stop") { _, _ ->
+                WhatsAppTitleHelper.disableAndForget(this)
+                refreshHelperStatus()
+                AlertDialog.Builder(this)
+                    .setMessage("Helper turned off locally. Also disable it in Android Accessibility settings.")
+                    .setPositiveButton("Open Android settings") { _, _ ->
+                        startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                    }
+                    .setNegativeButton("Later", null)
+                    .show()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun confirmEndShift() {

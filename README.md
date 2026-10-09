@@ -1,4 +1,34 @@
-# Security Patrol Camera — v0.1.10
+# Security Patrol Camera — v0.1.11 (experimental title helper)
+
+## NEW: WhatsApp Chat Title Helper — private test only
+
+**Build:** test/whatsapp-title-helper-v0111 — not merged into stable main.
+
+- Optional Android Accessibility Service, declared for **com.whatsapp** and **com.whatsapp.w4b** only. It is OFF until explicit in-app consent and explicit Android Accessibility enablement.
+- When you choose the regular WhatsApp or WhatsApp Business sharing option, the test helper is armed for **120 seconds maximum**. It checks only exact WhatsApp chat title view IDs (such as `conversation_contact_name`), never message bodies or chat lists.
+- A detected label is a **possible chat name, not proof of which group received the photos**. It may be a person's name, or the id may no longer exist in recent WhatsApp versions. You must confirm it yourself from Settings → WhatsApp group helper (TEST).
+- Only the most recent candidate and the manually confirmed label are saved on your phone, in private app preferences. There is no server or upload, no automated WhatsApp UI actions, no sending, no bypass of permissions, and **no ability to reopen the group automatically**.
+- The watch stops after 2 minutes or when you return to the Photos screen. You can delete the stored names and disable future observation within Settings; turn off the service in Android Accessibility settings to revoke permission completely.
+- The existing WhatsApp image-sharing process is unchanged.
+- This is an Android Studio/debug experiment; Android accessibility privacy disclosure and Google Play's separate Accessibility API declaration/approval rules apply if you ever consider publishing it.
+
+### Test on your own phone
+1. Install the debug build from this **test branch** (do not just pull main). Do **not uninstall** an app with important privately stored photos.
+2. In Settings → WhatsApp group helper (TEST) → WhatsApp helper options, tap **Enable helper / Android permission** and accept the disclosure.
+3. In Android Accessibility settings, explicitly enable **Security Patrol: WhatsApp Title Helper (TEST)**; on some sideloaded Android devices enabling restricted settings requires additional approval.
+4. Return to the Patrol Camera and take or select test photos. Choose **WhatsApp**, not Other apps, from the photo-sharing popup.
+5. Select your **Pizza group**, review the photo recipient, and send test images if appropriate; if WhatsApp never displays its actual chat header during sharing, visit the group's conversation briefly (within 2 minutes).
+6. Return to Patrol Photos → Settings → WhatsApp helper options. Check **Possible chat (NOT confirmed)** and confirm only if the displayed name is truly Pizza.
+7. If no name appears, the service or WhatsApp may not expose the expected title field. Send a screenshot of the test helper status; **do not send private WhatsApp messages**.
+8. When done, **Forget name and turn off helper** in the app and disable its service in Android Accessibility.
+
+### Privacy & practicality
+- Enabling Accessibility is a powerful system permission. This code deliberately filters to WhatsApp title elements only, and does not enumerate chat lists, notifications, message contents, or contacts. It does not call performAction, inject touches, or intercept Send.
+- A chat title alone is insufficient to identify a group securely or direct a future share. Duplicate group names exist, and WhatsApp does not officially promise stable identifiers to ordinary share-intent clients.
+- Test with an innocuous personal group and harmless sample photos, not work-sensitive patrol content.
+- The stable v0.1.10 code remains on main.
+
+
 
 ## v0.1.10 — cleaner sharing popup
 

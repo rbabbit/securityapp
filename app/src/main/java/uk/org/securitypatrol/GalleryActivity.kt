@@ -62,6 +62,9 @@ class GalleryActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         if (::gallery.isInitialized) {
+            // Stop observing as soon as the user returns from WhatsApp.
+            // The optional candidate stays local until approved or cleared.
+            WhatsAppTitleHelper.finishOnReturn(this)?.let { toast(it) }
             // Re-read the last WhatsApp share attempt and updated camera shots.
             store = PatrolStore(this)
             renderPhotos()
