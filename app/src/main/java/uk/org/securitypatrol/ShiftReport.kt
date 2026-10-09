@@ -32,6 +32,8 @@ object ShiftReport {
         appendLine("Patrol rounds: " + shift.rounds.size)
         appendLine("Photographs: " + shift.photos.size)
         appendLine("Manually confirmed sent: " + shift.photos.count { it.confirmedSent })
+        appendLine("Photographs flagged as incidents: " + shift.photos.count { it.incidentFlag })
+        appendLine("Site checkpoints configured: " + shift.checkpoints.size)
         appendLine()
 
         shift.rounds.forEachIndexed { index, round ->
@@ -41,6 +43,30 @@ object ShiftReport {
             appendLine("Ended: " + (round.endedMs?.let(::stamp) ?: "Not recorded"))
             appendLine("Photos: " + pictures.size)
             appendLine("Marked sent: " + pictures.count { it.confirmedSent })
+            val incidents = pictures.filter { it.incidentFlag }
+            appendLine("Incident photos: " + incidents.size)
+            incidents.forEach {
+                appendLine("  Flagged photo: " + stamp(it.timeMs) + " — " + it.place)
+            }
+            if (shift.checkpoints.isNotEmpty()) {
+                val applicable = shift.checkpoints.filter { checkpoint ->
+                    round.endedMs == null || checkpoint.addedAtMs <= round.endedMs!!
+                }
+                val completed = applicable.count {
+                    round.checkedCheckpoints.containsKey(it.id)
+                }
+                appendLine("Checkpoints marked visited: " + completed + "/" + applicable.size)
+                shift.checkpoints.forEach { checkpoint ->
+                    val checkedAt = round.checkedCheckpoints[checkpoint.id]
+                    val status = when {
+                        checkedAt != null -> stamp(checkedAt)
+                        round.endedMs != null && checkpoint.addedAtMs > round.endedMs!! ->
+                            "NOT CONFIGURED YET"
+                        else -> "NOT CHECKED"
+                    }
+                    appendLine("  " + checkpoint.name + ": " + status)
+                }
+            }
             if (pictures.isNotEmpty()) {
                 appendLine("First photo: " + stamp(pictures.first().timeMs))
                 appendLine("Last photo: " + stamp(pictures.last().timeMs))
@@ -53,6 +79,8 @@ object ShiftReport {
         }
         appendLine("Note: 'Marked sent' reflects manual confirmation in the app,")
         appendLine("not independent verification of WhatsApp delivery.")
+        appendLine("Checkpoint visits are officer-ticked, not GPS/QR verification.")
+        appendLine("Incident flags identify photos for review, not verified incidents.")
     }
 
     fun show(activity: Activity, shift: PatrolShift) {

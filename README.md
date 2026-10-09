@@ -2,7 +2,7 @@
 
 An Android-first, offline-capable patrol photography app for security officers who need **fast successive photos**, an accurate UK date/time stamp, location details, smaller files, and quick sharing to workplace WhatsApp groups.
 
-> **Project status:** Android Studio Kotlin/CameraX **v0.1.5 test version source code committed**. The code is an initial proof of concept, **not a verified APK or production-tested app**. Build results, device speed and WhatsApp behaviour still need real testing.
+> **Project status:** Android Studio Kotlin/CameraX **v0.1.6 test version source code committed**. The code is an initial proof of concept, **not a verified APK or production-tested app**. Build results, device speed and WhatsApp behaviour still need real testing.
 
 1. In Android Studio, click **Get from VCS** (or **File → New → Project from Version Control**).
 2. Paste `https://github.com/rbabbit/securityapp.git`, choose a local folder, and click **Clone**.
@@ -12,6 +12,27 @@ An Android-first, offline-capable patrol photography app for security officers w
 6. Grant Camera permission and (optionally) Location permission, start a shift, and try repeated pictures and a small WhatsApp batch.
 
 This repo **is already an Android Studio project**. Do **not** make a second Empty Activity project inside it.
+
+## v0.1.6 — Incident flags, checkpoint checklist and secure-device export
+
+- **Flag incident** or **Unflag incident** beside each photo in the patrol gallery. The flag is saved privately with the photo, without altering the JPEG, its GPS/date stamp or previous WhatsApp sends.
+- **Flagged** selection button selects flagged photographs in the current patrol (or whole shift only if deliberately viewing all patrols). The shift report displays incident-photo totals and timestamps.
+- **Patrol checkpoints**: within a selected patrol, choose Checkpoints to mark named checkpoints as visited. Check times are saved with that round. Use **Add checkpoint** to configure site entries such as Main Gate or Fire Exit A. Checkpoint names carry over automatically to a **new shift with the same employer and site**, but previous ticked/completed states are never carried over.
+- A checkpoint can only be ticked during the active patrol, never afterwards. Removing a completed check requires confirmation. Checklist entries are **manually ticked, not automatically GPS/QR verified**; the shift report states this.
+- **Export shift ZIP**: choose a shift, tap Export shift ZIP, and select a destination using Android's system file picker. The ZIP includes ALL saved compressed/stamped photos for that shift, a text shift report and JSON metadata with GPS, photo incident flags, round timestamps and checklist records. Optionally include available large originals (if not already deleted).
+- Export checks that every compressed image exists and is readable **before writing**. If processing isn't finished or any image is missing, it fails visibly rather than misleadingly claiming a complete backup. It never deletes or modifies app photos.
+- ZIP archives are **not encrypted**, and include potentially sensitive security photos and GPS data. Only save/share them where workplace rules permit. The ZIP is an export; **ZIP import/restore into the app is not yet implemented**.
+- The existing flash/torch modes, rapid camera, UK timestamps, photo sharing through WhatsApp, Select All, per-round notes and send-confirmation controls remain in place.
+
+### Quick test checklist for v0.1.6
+
+1. Mark a single photo as an incident. Leave and reopen the gallery: the flag should persist. Use the Flagged selection button; other photos should not become selected.
+2. In an active patrol, add "Main Gate" and "Rear Door" under Checkpoints. Tick them and check that recorded visit times appear in the shift report.
+3. Start Patrol 2; confirm the checkpoint names carry over but the checkmarks don't. End the shift and confirm historical visits cannot be altered.
+4. Open Export shift ZIP → **Small stamped photos + report + records** → choose a local folder. Unzip the file to confirm all photos, the text report and `metadata.json` are included.
+5. Test optional originals separately; photos whose originals were previously deleted should still export their smaller copies.
+6. Send a small set of photos to your test WhatsApp group. The existing group chooser must continue working.
+7. Don't uninstall a previous debug APK just to update: **all app-private photos and shift records can be lost**, and an update may require the same Android signing key.
 
 ## v0.1.5 — four useful security-shift upgrades
 
