@@ -176,7 +176,7 @@ class GalleryActivity : AppCompatActivity() {
         .filter { roundId == null || it.roundId == roundId }
 
     private fun shareReady(photo: PatrolPhoto): Boolean =
-        photo.smallPath?.let { PhotoProcessor.isValidJpeg(File(filesDir, it)) } == true
+        photo.smallPath?.let { File(filesDir, it).isFile } == true
 
     private fun setPatrolOptions() {
         val shift = currentShift()
