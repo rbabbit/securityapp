@@ -19,7 +19,7 @@ import kotlin.math.max
 object PhotoProcessor {
     private const val OUTPUT_LONG_EDGE = 1920
 
-    fun process(context: Context, photo: PatrolPhoto): Pair<String, String> {
+    fun process(context: Context, photo: PatrolPhoto, company: String): Pair<String, String> {
         val input = photo.originalPath?.let { File(context.filesDir, it) }
             ?: error("Missing original path")
         require(input.isFile) { "Original JPEG missing" }
@@ -31,13 +31,13 @@ object PhotoProcessor {
         base.parentFile?.mkdirs()
         small.parentFile?.mkdirs()
         FileOutputStream(base).use { check(bitmap.compress(Bitmap.CompressFormat.JPEG, 80, it)) }
-        stampAndSave(bitmap, photo, small)
+        stampAndSave(bitmap, photo, small, company)
         bitmap.recycle()
         require(isValidJpeg(small) && isValidJpeg(base)) { "Compressed photo validation failed" }
         return baseRel to smallRel
     }
 
-    fun restamp(context: Context, photo: PatrolPhoto, newPlace: String) {
+    fun restamp(context: Context, photo: PatrolPhoto, newPlace: String, company: String) {
         val base = photo.basePath?.let { File(context.filesDir, it) }
             ?: error("Original compressed base missing")
         val small = photo.smallPath?.let { File(context.filesDir, it) }
@@ -46,7 +46,7 @@ object PhotoProcessor {
         val bitmap = BitmapFactory.decodeFile(base.absolutePath) ?: error("Cannot decode base JPEG")
         val revised = photo.copy(place = newPlace)
         val replacement = File(small.parentFile, small.name + ".tmp")
-        stampAndSave(bitmap, revised, replacement)
+        stampAndSave(bitmap, revised, replacement, company)
         bitmap.recycle()
         require(isValidJpeg(replacement)) { "Revised JPEG is invalid" }
         // Replacing the small file never removes the preserved un-stamped base.
@@ -88,13 +88,13 @@ object PhotoProcessor {
         }
     }
 
-    private fun stampAndSave(source: Bitmap, photo: PatrolPhoto, destination: File) {
+    private fun stampAndSave(source: Bitmap, photo: PatrolPhoto, destination: File, company: String) {
         val output = source.copy(Bitmap.Config.ARGB_8888, true)
         val canvas = Canvas(output)
         val textSize = max(19f, output.width / 39f)
         val line = textSize * 1.33f
         val padding = textSize * 0.65f
-        val areaHeight = line * 3.0f + padding * 2.0f
+        val areaHeight = line * 4.0f + padding * 2.0f
         val areaTop = output.height - areaHeight
         val bg = Paint().apply { color = Color.argb(202, 6, 15, 25) }
         canvas.drawRect(0f, areaTop, output.width.toFloat(), output.height.toFloat(), bg)
@@ -110,7 +110,14 @@ object PhotoProcessor {
         val gps = if (photo.lat != null && photo.lon != null) {
             String.format(Locale.UK, "GPS: %.6f, %.6f  (±%.0f m)", photo.lat, photo.lon, photo.accuracyMetres ?: 0f)
         } else "GPS: unavailable"
-        val lines = listOf(photo.place.ifBlank { "Site not entered" }, formatter.format(Date(photo.timeMs)), gps)
+        // Keep company and editable site separate, so neither is lost or
+        // confused with GPS coordinates. Use the shift's saved company name.
+        val lines = listOf(
+            "Company: " + company.trim().ifBlank { "Not entered" },
+            "Site: " + photo.place.ifBlank { "Not entered" },
+            formatter.format(Date(photo.timeMs)),
+            gps
+        )
         val left = padding
         val maxWidth = output.width - 2f * padding
         lines.forEachIndexed { index, value ->

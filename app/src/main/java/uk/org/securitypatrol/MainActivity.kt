@@ -464,7 +464,7 @@ class MainActivity : AppCompatActivity() {
                         }
                         imageProcessor.execute {
                             try {
-                                val (base, small) = PhotoProcessor.process(this@MainActivity, photo)
+                                val (base, small) = PhotoProcessor.process(this@MainActivity, photo, shift.company)
                                 store.processed(photo.id, base, small)
                                 runOnUiThread { displayState() }
                             } catch (e: Exception) {

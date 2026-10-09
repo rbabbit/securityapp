@@ -2,7 +2,7 @@
 
 An Android-first, offline-capable patrol photography app for security officers who need **fast successive photos**, an accurate UK date/time stamp, location details, smaller files, and quick sharing to workplace WhatsApp groups.
 
-> **Project status:** Android Studio Kotlin/CameraX **v0.1.3 test version source code committed**. The code is an initial proof of concept, **not a verified APK or production-tested app**. Build results, device speed and WhatsApp behaviour still need real testing.
+> **Project status:** Android Studio Kotlin/CameraX **v0.1.4 test version source code committed**. The code is an initial proof of concept, **not a verified APK or production-tested app**. Build results, device speed and WhatsApp behaviour still need real testing.
 
 1. In Android Studio, click **Get from VCS** (or **File → New → Project from Version Control**).
 2. Paste `https://github.com/rbabbit/securityapp.git`, choose a local folder, and click **Clone**.
@@ -12,6 +12,15 @@ An Android-first, offline-capable patrol photography app for security officers w
 6. Grant Camera permission and (optionally) Location permission, start a shift, and try repeated pictures and a small WhatsApp batch.
 
 This repo **is already an Android Studio project**. Do **not** make a second Empty Activity project inside it.
+
+## v0.1.4 — add security company to photo stamp
+
+- New photographs now have **four permanently visible lines** in the compressed WhatsApp copy: `Company: [shift company]`, `Site: [editable site/place]`, UK capture date/time and the measured GPS position (or an honest unavailable label).
+- The company comes from the **Start Shift** company field; the site continues to come from Start Shift / Edit Place. They appear on separate rows rather than hiding the company.
+- **No changes to the original full-resolution files or metadata format.** Processing and gallery re-stamping receive the company from the photograph's existing shift, so older shift records are still compatible.
+- In the shift gallery, choose a patrol (or **All patrols**) and tap **Update company + site stamps on existing photos** to explicitly refresh the **local compressed copies** from their clean image bases. Existing WhatsApp messages stay unchanged.
+- Editing a photo's place name now also preserves its company line when recreating the compressed stamp. UK time, GPS, shutter click, flash selection, hourly rounds and sharing remain unchanged.
+- Updating an APK requires the same Android signing key to preserve local app data. **Do not uninstall a previous debug build if you need its privately stored photos**.
 
 ## v0.1.3 — camera flash Off / On / Auto
 
