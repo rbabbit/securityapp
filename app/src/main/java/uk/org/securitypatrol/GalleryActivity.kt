@@ -134,6 +134,13 @@ class GalleryActivity : AppCompatActivity() {
         secondRow.addView(action("Delete originals (shift)") { askDeleteOriginals() }, LinearLayout.LayoutParams(0, dp(52), 1f))
         screen.addView(secondRow)
 
+        // Existing compressed photos can be updated without changing the
+        // originals, timestamps, recorded GPS or previously shared messages.
+        screen.addView(
+            action("Update company + site stamps on existing photos") { refreshVisibleStamps() },
+            LinearLayout.LayoutParams(-1, dp(48))
+        )
+
         container = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val scroll = ScrollView(this).apply { addView(container) }
         screen.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -369,6 +376,49 @@ class GalleryActivity : AppCompatActivity() {
             .setNegativeButton("Keep originals", null).show()
     }
 
+    private fun refreshVisibleStamps() {
+        val shift = currentShift() ?: return
+        val scope = if (selectedRoundId == null) "the entire shift" else "this patrol"
+        val candidates = currentPhotos().filter { photo ->
+            photo.basePath?.let { PhotoProcessor.isValidJpeg(File(filesDir, it)) } == true &&
+                photo.smallPath?.let { PhotoProcessor.isValidJpeg(File(filesDir, it)) } == true
+        }
+        if (candidates.isEmpty()) {
+            message("No completed photos available for re-stamping")
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Update " + candidates.size + " photo stamps?")
+            .setMessage(
+                "Adds Company: " + shift.company + " and each photo's saved site " +
+                    "to the small photos in " + scope + ". Original files, GPS, " +
+                    "timestamps and sent flags stay unchanged. Photos already sent " +
+                    "through WhatsApp cannot be changed there."
+            )
+            .setPositiveButton("Update stamps") { _, _ ->
+                Thread {
+                    var updated = 0
+                    var failed = 0
+                    candidates.forEach { photo ->
+                        try {
+                            PhotoProcessor.restamp(this, photo, photo.place, shift.company)
+                            updated++
+                        } catch (e: Exception) {
+                            failed++
+                            android.util.Log.e("PatrolGallery", "Could not re-stamp photo " + photo.id, e)
+                        }
+                    }
+                    runOnUiThread {
+                        renderPhotos()
+                        message("Updated " + updated + " photos" +
+                            if (failed > 0) "; " + failed + " could not be updated" else "")
+                    }
+                }.start()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
     private fun editPhotoPlace(photo: PatrolPhoto) {
         if (photo.basePath == null || photo.smallPath == null) {
             message("This photo is still processing")
@@ -387,7 +437,8 @@ class GalleryActivity : AppCompatActivity() {
                 if (newPlace.isEmpty()) return@setPositiveButton
                 Thread {
                     try {
-                        PhotoProcessor.restamp(this, photo, newPlace)
+                        val company = store.shifts.firstOrNull { it.id == photo.shiftId }?.company.orEmpty()
+                        PhotoProcessor.restamp(this, photo, newPlace, company)
                         store.updatePlace(photo.id, newPlace)
                         runOnUiThread { renderPhotos(); message("Place name updated") }
                     } catch (e: Exception) {
