@@ -27,7 +27,8 @@ data class PatrolPhoto(
 
 data class PatrolCheckpoint(
     val id: String,
-    val name: String
+    val name: String,
+    val addedAtMs: Long = System.currentTimeMillis()
 )
 
 data class PatrolRound(
@@ -79,7 +80,7 @@ class PatrolStore(context: Context) {
                 it.place.equals(place.trim(), ignoreCase = true)
         }
         previousSite?.checkpoints?.forEach {
-            shift.checkpoints.add(PatrolCheckpoint(UUID.randomUUID().toString(), it.name))
+            shift.checkpoints.add(PatrolCheckpoint(UUID.randomUUID().toString(), it.name, now))
         }
         val initialRound = PatrolRound(UUID.randomUUID().toString(), now)
         shift.rounds.add(initialRound)
@@ -285,7 +286,9 @@ class PatrolStore(context: Context) {
                 .put("autoHourly", shift.autoHourly)
             val checkpoints = JSONArray()
             shift.checkpoints.forEach { checkpoint ->
-                checkpoints.put(JSONObject().put("id", checkpoint.id).put("name", checkpoint.name))
+                checkpoints.put(JSONObject().put("id", checkpoint.id)
+                    .put("name", checkpoint.name)
+                    .put("addedAtMs", checkpoint.addedAtMs))
             }
             sj.put("checkpoints", checkpoints)
             val rounds = JSONArray()
@@ -355,7 +358,10 @@ class PatrolStore(context: Context) {
                 val checkpoints = sj.optJSONArray("checkpoints") ?: JSONArray()
                 for (c in 0 until checkpoints.length()) {
                     val entry = checkpoints.getJSONObject(c)
-                    shift.checkpoints.add(PatrolCheckpoint(entry.getString("id"), entry.getString("name")))
+                    shift.checkpoints.add(PatrolCheckpoint(
+                        entry.getString("id"), entry.getString("name"),
+                        entry.optLong("addedAtMs", shift.startedMs)
+                    ))
                 }
                 val rounds = sj.optJSONArray("rounds") ?: JSONArray()
                 for (r in 0 until rounds.length()) {
