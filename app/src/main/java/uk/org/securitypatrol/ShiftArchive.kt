@@ -57,6 +57,7 @@ object ShiftArchive {
         shift.checkpoints.forEach { checkpoint ->
             checkpoints.put(
                 JSONObject().put("id", checkpoint.id).put("name", checkpoint.name)
+                    .put("addedAtMs", checkpoint.addedAtMs)
             )
         }
         manifest.put("checkpoints", checkpoints)
