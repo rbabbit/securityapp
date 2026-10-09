@@ -2,5 +2,5 @@
 <resources>
     <string name="app_name">Security Patrol Camera</string>
     <string name="whatsapp_helper_service_name">Security Patrol: WhatsApp Title Helper (TEST)</string>
-    <string name="whatsapp_helper_description">Opt-in test: inspect only WhatsApp's chat-title accessibility field for up to two minutes after sharing Security Patrol photos. Only possible chat names are saved locally for confirmation; no messages, passwords or photos are collected.</string>
+    <string name="whatsapp_helper_description">Opt-in test: inspect only the WhatsApp chat-title accessibility field for up to two minutes after sharing Security Patrol photos. Only possible chat names are saved locally for confirmation; no messages, passwords or photos are collected.</string>
 </resources>
