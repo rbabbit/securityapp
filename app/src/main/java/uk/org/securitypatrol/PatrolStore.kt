@@ -19,7 +19,15 @@ data class PatrolPhoto(
     var originalPath: String?,
     var basePath: String? = null,
     var smallPath: String? = null,
-    var confirmedSent: Boolean = false
+    var confirmedSent: Boolean = false,
+    // The patrol round this photo belongs to (kept across app restarts).
+    var roundId: String? = null
+)
+
+data class PatrolRound(
+    val id: String,
+    val startedMs: Long,
+    var endedMs: Long? = null
 )
 
 data class PatrolShift(
@@ -28,7 +36,10 @@ data class PatrolShift(
     var place: String,
     val startedMs: Long,
     var endedMs: Long? = null,
-    val photos: MutableList<PatrolPhoto> = mutableListOf()
+    val photos: MutableList<PatrolPhoto> = mutableListOf(),
+    val rounds: MutableList<PatrolRound> = mutableListOf(),
+    var activeRoundId: String? = null,
+    var autoHourly: Boolean = true
 )
 
 class PatrolStore(context: Context) {
@@ -45,9 +56,16 @@ class PatrolStore(context: Context) {
     fun activeShift(): PatrolShift? = shifts.firstOrNull { it.id == activeId && it.endedMs == null }
 
     @Synchronized
-    fun startShift(company: String, place: String): PatrolShift {
+    fun startShift(company: String, place: String, autoHourly: Boolean = true): PatrolShift {
         check(activeShift() == null) { "End the current shift first" }
-        val shift = PatrolShift(UUID.randomUUID().toString(), company.trim(), place.trim(), System.currentTimeMillis())
+        val now = System.currentTimeMillis()
+        val shift = PatrolShift(
+            UUID.randomUUID().toString(), company.trim(), place.trim(),
+            now, autoHourly = autoHourly
+        )
+        val initialRound = PatrolRound(UUID.randomUUID().toString(), now)
+        shift.rounds.add(initialRound)
+        shift.activeRoundId = initialRound.id
         shifts.add(0, shift)
         activeId = shift.id
         save()
@@ -56,9 +74,70 @@ class PatrolStore(context: Context) {
 
     @Synchronized
     fun endShift() {
-        activeShift()?.endedMs = System.currentTimeMillis()
+        activeShift()?.let { shift ->
+            val now = System.currentTimeMillis()
+            shift.endedMs = now
+            shift.rounds.firstOrNull { it.id == shift.activeRoundId }?.endedMs = now
+            shift.activeRoundId = null
+        }
         activeId = null
         save()
+    }
+
+    @Synchronized
+    fun currentRound(): PatrolRound? {
+        val shift = activeShift() ?: return null
+        return shift.rounds.firstOrNull { it.id == shift.activeRoundId }
+    }
+
+    /**
+     * An officer can always manually begin a new round.
+     * Do not create repeated empty rounds from accidental taps.
+     */
+    @Synchronized
+    fun startNextRound(): PatrolRound {
+        val shift = activeShift() ?: error("Start a shift first")
+        val existing = currentRound()
+        if (existing != null && shift.photos.none { it.roundId == existing.id }) return existing
+        val now = System.currentTimeMillis()
+        existing?.endedMs = now
+        val next = PatrolRound(UUID.randomUUID().toString(), now)
+        shift.rounds.add(next)
+        shift.activeRoundId = next.id
+        save()
+        return next
+    }
+
+    /**
+     * Auto-split only after a roughly hourly cycle PLUS a real quiet break.
+     * A patrol at 10:55-11:10 must stay in one round across the clock hour.
+     * Check only on shutter press, no timers or background location needed.
+     */
+    @Synchronized
+    fun roundForCapture(captureMs: Long): PatrolRound {
+        val shift = activeShift() ?: error("Start a shift first")
+        var round = currentRound()
+        if (round == null) {
+            round = PatrolRound(UUID.randomUUID().toString(), captureMs)
+            shift.rounds.add(round)
+            shift.activeRoundId = round.id
+            save()
+        }
+        val captures = shift.photos.filter { it.roundId == round.id }
+        if (shift.autoHourly && captures.isNotEmpty()) {
+            val first = captures.minOf { it.timeMs }
+            val last = captures.maxOf { it.timeMs }
+            val elapsed = captureMs - first
+            val idle = captureMs - last
+            if (elapsed >= 50 * 60_000L && idle >= 15 * 60_000L) {
+                round.endedMs = captureMs
+                round = PatrolRound(UUID.randomUUID().toString(), captureMs)
+                shift.rounds.add(round)
+                shift.activeRoundId = round.id
+                save()
+            }
+        }
+        return round
     }
 
     @Synchronized
@@ -69,7 +148,10 @@ class PatrolStore(context: Context) {
 
     @Synchronized
     fun addPhoto(photo: PatrolPhoto) {
-        shifts.firstOrNull { it.id == photo.shiftId }?.photos?.add(photo)
+        shifts.firstOrNull { it.id == photo.shiftId }?.let { shift ->
+            if (photo.roundId == null) photo.roundId = shift.activeRoundId ?: shift.rounds.lastOrNull()?.id
+            shift.photos.add(photo)
+        }
         save()
     }
 
@@ -117,7 +199,7 @@ class PatrolStore(context: Context) {
     @Synchronized
     fun save() {
         val document = JSONObject()
-        document.put("version", 1)
+        document.put("version", 2)
         document.put("activeId", activeId ?: JSONObject.NULL)
         document.put("pendingShareIds", JSONArray(pendingShareIds))
         val items = JSONArray()
@@ -126,6 +208,17 @@ class PatrolStore(context: Context) {
                 .put("id", shift.id).put("company", shift.company).put("place", shift.place)
                 .put("startedMs", shift.startedMs)
                 .put("endedMs", shift.endedMs ?: JSONObject.NULL)
+                .put("activeRoundId", shift.activeRoundId ?: JSONObject.NULL)
+                .put("autoHourly", shift.autoHourly)
+            val rounds = JSONArray()
+            shift.rounds.forEach { r ->
+                rounds.put(
+                    JSONObject().put("id", r.id)
+                        .put("startedMs", r.startedMs)
+                        .put("endedMs", r.endedMs ?: JSONObject.NULL)
+                )
+            }
+            sj.put("rounds", rounds)
             val photos = JSONArray()
             shift.photos.forEach { p ->
                 photos.put(
@@ -138,6 +231,7 @@ class PatrolStore(context: Context) {
                         .put("basePath", p.basePath ?: JSONObject.NULL)
                         .put("smallPath", p.smallPath ?: JSONObject.NULL)
                         .put("confirmedSent", p.confirmedSent)
+                        .put("roundId", p.roundId ?: JSONObject.NULL)
                 )
             }
             items.put(sj.put("photos", photos))
@@ -167,8 +261,19 @@ class PatrolStore(context: Context) {
                 val shift = PatrolShift(
                     sj.getString("id"), sj.getString("company"),
                     sj.optString("place"), sj.getLong("startedMs"),
-                    if (sj.isNull("endedMs")) null else sj.optLong("endedMs")
+                    if (sj.isNull("endedMs")) null else sj.optLong("endedMs"),
+                    autoHourly = sj.optBoolean("autoHourly", true)
                 )
+                shift.activeRoundId = sj.pathOrNull("activeRoundId")
+                val rounds = sj.optJSONArray("rounds") ?: JSONArray()
+                for (r in 0 until rounds.length()) {
+                    val entry = rounds.getJSONObject(r)
+                    shift.rounds.add(PatrolRound(
+                        entry.getString("id"),
+                        entry.getLong("startedMs"),
+                        if (entry.isNull("endedMs")) null else entry.optLong("endedMs")
+                    ))
+                }
                 val photos = sj.optJSONArray("photos") ?: JSONArray()
                 for (j in 0 until photos.length()) {
                     val p = photos.getJSONObject(j)
@@ -184,8 +289,29 @@ class PatrolStore(context: Context) {
                         originalPath = p.pathOrNull("originalPath"),
                         basePath = p.pathOrNull("basePath"),
                         smallPath = p.pathOrNull("smallPath"),
-                        confirmedSent = p.optBoolean("confirmedSent", false)
+                        confirmedSent = p.optBoolean("confirmedSent", false),
+                        roundId = p.pathOrNull("roundId")
                     ))
+                }
+                // Upgrade existing 0.1.1 shifts without discarding or reordering
+                // any photo or changing its capture time or storage path.
+                if (shift.rounds.isEmpty()) {
+                    val timestamp = shift.photos.minOfOrNull { it.timeMs } ?: shift.startedMs
+                    val legacyRound = PatrolRound(
+                        UUID.randomUUID().toString(), timestamp, shift.endedMs
+                    )
+                    shift.rounds.add(legacyRound)
+                }
+                val known = shift.rounds.map { it.id }.toSet()
+                shift.photos.forEach { photo ->
+                    if (photo.roundId !in known) photo.roundId = shift.rounds.first().id
+                }
+                if (shift.endedMs == null) {
+                    if (shift.activeRoundId !in known) {
+                        shift.activeRoundId = shift.rounds.last().id
+                    }
+                } else {
+                    shift.activeRoundId = null
                 }
                 shifts.add(shift)
             }

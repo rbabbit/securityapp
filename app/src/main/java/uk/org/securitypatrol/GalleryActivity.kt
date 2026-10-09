@@ -32,7 +32,10 @@ class GalleryActivity : AppCompatActivity() {
     private lateinit var store: PatrolStore
     private lateinit var container: LinearLayout
     private lateinit var heading: TextView
+    private lateinit var selectionStatus: TextView
     private lateinit var spinner: Spinner
+    private lateinit var patrolSpinner: Spinner
+    private var selectedRoundId: String? = null // null = deliberately view all rounds in this shift
     private val selectedIds = mutableSetOf<String>()
     private var currentId: String? = null
 
@@ -79,17 +82,47 @@ class GalleryActivity : AppCompatActivity() {
         spinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, labels.ifEmpty { listOf("No shifts yet") })
         currentId = store.activeShift()?.id ?: shifts.firstOrNull()?.id
         if (shifts.isNotEmpty()) spinner.setSelection(shifts.indexOfFirst { it.id == currentId }.coerceAtLeast(0))
+        patrolSpinner = Spinner(this)
+        screen.addView(patrolSpinner)
+        patrolSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val requested = if (position == 0) null else currentShift()?.rounds?.getOrNull(position - 1)?.id
+                if (requested != selectedRoundId) {
+                    selectedRoundId = requested
+                    selectedIds.clear()
+                    autoSelectUnsent()
+                }
+                renderPhotos()
+            }
+        }
         spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onNothingSelected(parent: AdapterView<*>?) {}
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 val next = store.shifts.getOrNull(position)?.id
-                if (next != currentId) { selectedIds.clear(); currentId = next }
+                if (next != currentId) {
+                    selectedIds.clear()
+                    currentId = next
+                    populatePatrols()
+                }
                 renderPhotos()
             }
         }
 
         heading = TextView(this).apply { textSize = 13f; setPadding(0, dp(8), 0, dp(6)) }
         screen.addView(heading)
+        selectionStatus = TextView(this).apply {
+            textSize = 13f
+            setTextColor(Color.LTGRAY)
+            setPadding(0, dp(3), 0, dp(6))
+        }
+        screen.addView(selectionStatus)
+
+        val selectionRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        selectionRow.addView(action("Select all") { selectAllReady() }, LinearLayout.LayoutParams(0, dp(48), 1f))
+        selectionRow.addView(action("Unsent only") { selectUnsent() }, LinearLayout.LayoutParams(0, dp(48), 1f))
+        selectionRow.addView(action("Clear") { clearSelection() }, LinearLayout.LayoutParams(0, dp(48), 1f))
+        screen.addView(selectionRow)
 
         val firstRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         firstRow.addView(action("Send selected") { sendSelected() }, LinearLayout.LayoutParams(0, dp(52), 1f))
@@ -98,35 +131,117 @@ class GalleryActivity : AppCompatActivity() {
 
         val secondRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         secondRow.addView(action("Confirm batch sent") { confirmLastBatch() }, LinearLayout.LayoutParams(0, dp(52), 1f))
-        secondRow.addView(action("Delete LARGE originals") { askDeleteOriginals() }, LinearLayout.LayoutParams(0, dp(52), 1f))
+        secondRow.addView(action("Delete originals (shift)") { askDeleteOriginals() }, LinearLayout.LayoutParams(0, dp(52), 1f))
         screen.addView(secondRow)
 
         container = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val scroll = ScrollView(this).apply { addView(container) }
         screen.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(screen)
+        populatePatrols()
         renderPhotos()
     }
 
     private fun currentShift(): PatrolShift? = store.shifts.firstOrNull { it.id == currentId }
+
+    private fun currentPhotos(): List<PatrolPhoto> = currentShift()?.photos.orEmpty().filter {
+        selectedRoundId == null || it.roundId == selectedRoundId
+    }
+
+    private fun isShareReady(photo: PatrolPhoto): Boolean =
+        photo.smallPath?.let { File(filesDir, it).isFile } == true
+
+    private fun populatePatrols() {
+        val shift = currentShift()
+        val labels = mutableListOf("All patrols (whole shift)")
+        shift?.rounds?.forEachIndexed { index, round ->
+            val count = shift.photos.count { it.roundId == round.id }
+            labels.add("Patrol " + (index + 1) + " — " + shortTime(round.startedMs) +
+                " (" + count + " photos)")
+        }
+        patrolSpinner.adapter = ArrayAdapter(
+            this, android.R.layout.simple_spinner_dropdown_item, labels
+        )
+        // Start on the CURRENT round rather than all shifts' photos; if a shift
+        // ended, show its latest round. All rounds is always an explicit choice.
+        selectedRoundId = if (shift?.activeRoundId != null) {
+            shift.activeRoundId
+        } else {
+            shift?.rounds?.lastOrNull()?.id
+        }
+        selectedIds.clear()
+        autoSelectUnsent()
+        val selectedIndex = shift?.rounds?.indexOfFirst { it.id == selectedRoundId } ?: -1
+        patrolSpinner.setSelection((selectedIndex + 1).coerceAtLeast(0))
+    }
+
+    private fun autoSelectUnsent() {
+        currentPhotos().filter { !it.confirmedSent && isShareReady(it) }
+            .forEach { selectedIds.add(it.id) }
+    }
+
+    private fun selectAllReady() {
+        selectedIds.clear()
+        currentPhotos().filter(::isShareReady).forEach { selectedIds.add(it.id) }
+        renderPhotos()
+    }
+
+    private fun selectUnsent() {
+        selectedIds.clear()
+        autoSelectUnsent()
+        renderPhotos()
+    }
+
+    private fun clearSelection() {
+        selectedIds.clear()
+        renderPhotos()
+    }
+
+    private fun updateSelectionStatus() {
+        val photos = currentPhotos()
+        val selected = photos.filter { selectedIds.contains(it.id) }
+        val resent = selected.count { it.confirmedSent }
+        selectionStatus.text = "${selected.size} selected / ${photos.count(::isShareReady)} ready" +
+            if (resent > 0) " — ${resent} already marked sent" else ""
+    }
 
     private fun renderPhotos() {
         if (!::container.isInitialized) return
         container.removeAllViews()
         val shift = currentShift()
         if (shift == null) {
+            selectedIds.clear()
             heading.text = "Start a shift from the camera to collect photos."
+            updateSelectionStatus()
             return
         }
-        val photos = shift.photos.sortedByDescending { it.timeMs }
+        val photos = currentPhotos().sortedByDescending { it.timeMs }
+        selectedIds.retainAll(photos.filter(::isShareReady).map { it.id }.toSet())
         val sent = photos.count { it.confirmedSent }
-        val ready = photos.count { it.smallPath != null }
+        val ready = photos.count(::isShareReady)
         val originals = photos.count { it.originalPath != null }
-        heading.text = photos.size.toString() + " photos • " + ready + " ready • " + sent +
-            " confirmed sent • " + originals + " originals\n" +
-            (if (shift.endedMs == null) "Shift active" else "Shift completed") +
-            " • " + shortDate(shift.startedMs)
+        val scopeLabel = if (selectedRoundId == null) "Whole shift" else {
+            "Patrol " + (shift.rounds.indexOfFirst { it.id == selectedRoundId } + 1)
+        }
+        heading.text = scopeLabel + " • " + photos.size + " photos • " + ready + " ready\n" +
+            sent + " confirmed sent • " + originals + " originals • " +
+            shortDate(shift.startedMs)
+        updateSelectionStatus()
+        var previousRoundId: String? = ""
         photos.forEach { photo ->
+            if (photo.roundId != previousRoundId) {
+                val roundNumber = shift.rounds.indexOfFirst { it.id == photo.roundId } + 1
+                val round = shift.rounds.firstOrNull { it.id == photo.roundId }
+                val headingText = TextView(this).apply {
+                    text = "PATROL " + roundNumber.coerceAtLeast(1) +
+                        "  •  " + (round?.let { shortTime(it.startedMs) } ?: shortTime(photo.timeMs))
+                    setTextColor(Color.WHITE)
+                    textSize = 15f
+                    setPadding(dp(7), dp(12), dp(7), dp(7))
+                }
+                container.addView(headingText)
+                previousRoundId = photo.roundId
+            }
             val panel = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(4), dp(7), dp(4), dp(7))
@@ -137,9 +252,10 @@ class GalleryActivity : AppCompatActivity() {
             }
             val check = CheckBox(this).apply {
                 isChecked = selectedIds.contains(photo.id)
-                isEnabled = photo.smallPath != null
+                isEnabled = isShareReady(photo)
                 setOnCheckedChangeListener { _, value ->
                     if (value) selectedIds.add(photo.id) else selectedIds.remove(photo.id)
+                    updateSelectionStatus()
                 }
             }
             row.addView(check)
@@ -173,14 +289,31 @@ class GalleryActivity : AppCompatActivity() {
     }
 
     private fun sendSelected() {
-        val shift = currentShift() ?: return
-        val photos = shift.photos.filter { selectedIds.contains(it.id) }
-        ShareHelper.share(this, store, photos)
+        val photos = currentPhotos().filter { selectedIds.contains(it.id) && isShareReady(it) }
+        if (photos.isEmpty()) {
+            message("No photos selected. Use Select all or Unsent only.")
+            return
+        }
+        val previouslySent = photos.count { it.confirmedSent }
+        if (previouslySent > 0) {
+            AlertDialog.Builder(this)
+                .setTitle("Some photos were already sent")
+                .setMessage("This selection includes $previouslySent photos marked sent. Share them again?")
+                .setPositiveButton("Send again") { _, _ -> ShareHelper.share(this, store, photos) }
+                .setNegativeButton("Cancel", null)
+                .show()
+        } else {
+            ShareHelper.share(this, store, photos)
+        }
     }
 
     private fun sendUnsent() {
-        val shift = currentShift() ?: return
-        ShareHelper.share(this, store, shift.photos.filter { !it.confirmedSent })
+        val photos = currentPhotos().filter { !it.confirmedSent && isShareReady(it) }
+        if (photos.isEmpty()) {
+            message("No unconfirmed photos ready in this patrol")
+            return
+        }
+        ShareHelper.share(this, store, photos)
     }
 
     private fun confirmLastBatch() {
@@ -190,7 +323,9 @@ class GalleryActivity : AppCompatActivity() {
             .setMessage("Confirm only if you actually pressed Send in WhatsApp. " +
                 count + " photographs were handed to the sharing screen.")
             .setPositiveButton("Yes, sent") { _, _ ->
+                val confirmedIds = store.pendingShareIds.toSet()
                 store.confirmShare()
+                selectedIds.removeAll(confirmedIds)
                 renderPhotos()
             }
             .setNegativeButton("Not sent") { _, _ ->
@@ -270,6 +405,9 @@ class GalleryActivity : AppCompatActivity() {
         setOnClickListener { clicked() }
     }
     private fun dp(value: Int) = (value * resources.displayMetrics.density + 0.5f).toInt()
+    private fun shortTime(time: Long): String = SimpleDateFormat("HH:mm", Locale.UK).apply {
+        timeZone = TimeZone.getTimeZone("Europe/London")
+    }.format(Date(time))
     private fun shortDate(time: Long): String = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.UK).apply {
         timeZone = TimeZone.getTimeZone("Europe/London")
     }.format(Date(time))
